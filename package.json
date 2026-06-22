@@ -4,12 +4,15 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
-    "start": "next start"
+    "build": "node scripts/migrate.mjs && next build",
+    "start": "next start",
+    "migrate": "node scripts/migrate.mjs"
   },
   "dependencies": {
     "next": "latest",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "@neondatabase/serverless": "latest",
+    "qrcode": "latest"
   }
 }
