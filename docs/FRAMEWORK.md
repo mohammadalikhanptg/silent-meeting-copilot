@@ -168,3 +168,7 @@ realtime), Clari Copilot (keyword cue cards, talk-ratio), Poised/Read (delivery 
   Cloudflare-hosted model). Latency vs quality.
 - Keep a slim offline prepared-lines fallback, or fully cloud.
 - Whether the framework document lives in this repo (current) or a dedicated repo.
+## Changelog
+- 2026-06-22: Dual-stream capture proven in Electron (helper-spike/).
+- 2026-06-22: GitHub repo created and pushed (ali@khan.vg). Framework doc added.
+- 2026-06-22: Next.js web app skeleton added under web/ (four-panel UI shell, responsive, dark theme). Vercel Root Directory MUST be set to "web" so Vercel builds the web app and ignores the Python prototype at repo root (that prototype caused the first Vercel deploy to fail on app/main.py).
