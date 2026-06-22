@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 import QRCode from 'qrcode';
 import { getSql } from '../../../lib/db';
 import { getPrePayload, generateTotpSecret, otpauthUri, verifyTotp, sessionCookieValue, cookieOptions, SESSION_COOKIE, SESSION_MAXAGE, PRE_COOKIE } from '../../../lib/auth';
@@ -43,8 +42,7 @@ export async function POST(req) {
   const sid = s[0].id;
 
   const res = NextResponse.json({ ok: true, redirect: '/' });
-  const c = await cookies();
-  c.set(SESSION_COOKIE, sessionCookieValue(pre.email, sid), cookieOptions(SESSION_MAXAGE));
-  c.set(PRE_COOKIE, '', cookieOptions(0));
+  res.cookies.set(SESSION_COOKIE, sessionCookieValue(pre.email, sid), cookieOptions(SESSION_MAXAGE));
+  res.cookies.set(PRE_COOKIE, '', cookieOptions(0));
   return res;
 }
