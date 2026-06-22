@@ -1,0 +1,13 @@
+{
+  "name": "smc-helper-spike",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Silent Meeting Copilot - Windows dual-stream capture spike (Electron). Proves microphone + system loopback as two separate streams with live level meters.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "latest"
+  }
+}

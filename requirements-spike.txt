@@ -1,0 +1,6 @@
+# Checkpoint 1 spike dependencies only (minimum to prove capture -> text).
+faster-whisper>=1.0.0
+sounddevice>=0.4.6
+numpy>=1.26
+python-dotenv>=1.0.0
+pydantic>=2.6

@@ -1,0 +1,19 @@
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+dist/
+out/
+build/
+.next/
+.vercel/
+data/
+*.log
+.env
+.env.local
+.dev.vars
+.DS_Store
+Thumbs.db
+# real, sensitive packs stay local; only the example pack ships
+packs/*
+!packs/example-pack/
