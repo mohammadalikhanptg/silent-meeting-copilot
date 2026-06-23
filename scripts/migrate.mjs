@@ -69,6 +69,8 @@ try {
     added_at     timestamptz NOT NULL DEFAULT now()
   )`;
   await sql`CREATE INDEX IF NOT EXISTS idx_profile_docs_user ON profile_docs (user_email, added_at)`;
+  // Auth hardening 1: track last_seen per session row for effective revocation
+  await sql`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_seen timestamptz`;
   console.log('[migrate] ok');
 } catch (e) {
   // Permission denied = local env has a read-only DATABASE_URL.

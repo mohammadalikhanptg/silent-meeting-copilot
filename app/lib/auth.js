@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { cookies } from 'next/headers';
+import { getSql } from './db';
 
 export const SESSION_COOKIE = 'smc_session';
 export const PRE_COOKIE = 'smc_pre';
@@ -132,6 +133,25 @@ export async function getSessionPayload() {
   const c = await cookies();
   const p = verifyToken(c.get(SESSION_COOKIE)?.value);
   if (!p || p.t !== 'session') return null;
+  if (!p.sid) return null; // all sessions have sid; missing sid = legacy invalid token
+
+  try {
+    const sql = getSql();
+    const rows = await sql`
+      SELECT id, revoked_at, expires_at FROM sessions WHERE id = ${p.sid} LIMIT 1
+    `;
+    if (!rows[0]) return null;
+    const row = rows[0];
+    if (row.revoked_at) return null; // revoked — caller should deny access
+    if (new Date(row.expires_at) < new Date()) return null;
+    // Update last_seen — fire-and-forget, never block the request
+    sql`UPDATE sessions SET last_seen = now() WHERE id = ${p.sid}`.catch(() => {});
+  } catch (e) {
+    // DB unavailable — fail closed (deny rather than bypass)
+    console.error('[auth] session DB check failed:', e.message);
+    return null;
+  }
+
   return p;
 }
 
