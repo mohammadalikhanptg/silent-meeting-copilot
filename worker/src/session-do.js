@@ -202,3 +202,70 @@ export async function transcribeAndClean(audioBytes, env, lang = null, mode = 'a
   const cleaned = (llmResult.response || raw).trim();
   return { raw, cleaned, provider };
 }
+
+// Generate live coaching from accumulated ME/OTHERS transcript lines.
+// Called by POST /coach. Returns structured coaching object.
+export async function generateCoaching({ me = [], others = [], objective = '' }, env) {
+  // Talk time balance — computed from word counts (no LLM needed)
+  const countWords = (lines) => lines.join(' ').split(/\s+/).filter(Boolean).length;
+  const meWords = countWords(me);
+  const othersWords = countWords(others);
+  const total = meWords + othersWords;
+  const mePercent = total > 0 ? Math.round((meWords / total) * 100) : 50;
+  const othersPercent = 100 - mePercent;
+
+  // Return fast defaults if there's not enough content to analyse
+  if (me.length + others.length < 3 || total < 20) {
+    return {
+      talkBalance: { mePercent, othersPercent },
+      openItems: [],
+      suggestions: ['Keep speaking — coaching will appear once there is enough transcript.'],
+      alignment: '',
+    };
+  }
+
+  // Build a truncated transcript (last 80 lines to stay within token budget)
+  const meRecent = me.slice(-40);
+  const othersRecent = others.slice(-40);
+  const transcriptLines = [
+    ...meRecent.map(t => `ME: ${t}`),
+    ...othersRecent.map(t => `OTHERS: ${t}`),
+  ].join('\n');
+
+  const objectiveLine = objective ? `Meeting objective: "${objective}"\n\n` : '';
+  const alignmentField = objective
+    ? '"alignment": "<one sentence on whether ME is staying on the stated objective, or empty string if on track>"'
+    : '"alignment": ""';
+
+  const prompt = `${objectiveLine}Meeting transcript (recent segments):\n\n${transcriptLines}\n\nReturn a JSON object with exactly these fields:\n{\n  "openItems": ["<question or issue raised by OTHERS not yet addressed by ME>", ...],\n  "suggestions": ["<concrete thing ME could say next>", ...],\n  ${alignmentField}\n}\n\nRules:\n- openItems: max 4 items, empty array if none\n- suggestions: 1 to 3 items, actionable and specific\n- alignment: only if objective is given; empty string otherwise\n- Return ONLY the JSON object, no other text`;
+
+  let parsed = { openItems: [], suggestions: [], alignment: '' };
+  try {
+    const llmResult = await env.AI.run('@cf/meta/llama-3.2-3b-instruct', {
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a real-time meeting coach. Analyse meeting transcripts and return structured coaching advice as a JSON object. Return ONLY valid JSON.',
+        },
+        { role: 'user', content: prompt },
+      ],
+      max_tokens: 512,
+    });
+
+    const text = (llmResult.response || '').trim();
+    // Extract JSON object from response (handle markdown code blocks or extra text)
+    const match = text.match(/\{[\s\S]*\}/);
+    if (match) {
+      parsed = JSON.parse(match[0]);
+    }
+  } catch (_) {
+    // LLM failed — return safe defaults rather than crashing
+  }
+
+  return {
+    talkBalance: { mePercent, othersPercent },
+    openItems: Array.isArray(parsed.openItems) ? parsed.openItems.slice(0, 4) : [],
+    suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions.slice(0, 3) : [],
+    alignment: typeof parsed.alignment === 'string' ? parsed.alignment : '',
+  };
+}

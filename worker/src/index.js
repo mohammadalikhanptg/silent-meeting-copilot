@@ -1,4 +1,4 @@
-import { SessionDO, transcribeAndClean } from './session-do.js';
+import { SessionDO, transcribeAndClean, generateCoaching } from './session-do.js';
 
 export { SessionDO };
 
@@ -44,6 +44,20 @@ export default {
         return json({ ok: true, ...result });
       } catch (err) {
         console.error('Transcribe error:', err);
+        return json({ error: String(err) }, 500);
+      }
+    }
+
+    // POST /coach — live coaching from accumulated transcript
+    // Body: {me: string[], others: string[], objective?: string}
+    // Returns: {ok, talkBalance, openItems, suggestions, alignment}
+    if (url.pathname === '/coach' && request.method === 'POST') {
+      try {
+        const body = await request.json();
+        const result = await generateCoaching(body, env);
+        return json({ ok: true, ...result });
+      } catch (err) {
+        console.error('Coach error:', err);
         return json({ error: String(err) }, 500);
       }
     }

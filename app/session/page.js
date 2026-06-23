@@ -5,6 +5,8 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 const ENGINE_URL = process.env.NEXT_PUBLIC_ENGINE_URL || 'https://smc-engine.ali-6b8.workers.dev';
 const CHUNK_MS = 2500;
 const MAX_RECONNECTS = 5;
+const COACH_INTERVAL_MS = 25000; // poll coaching every 25s
+const COACH_MIN_SEGMENTS = 3;    // don't call coach until at least this many segments
 
 // Language hint sent alongside each mode
 const MODE_LANG = { english: 'en', 'hindi-urdu': 'hi', auto: null };
@@ -32,9 +34,11 @@ export default function SessionPage() {
   // Session code starts empty to avoid SSR hydration mismatch; set in useEffect
   const [sessionCode, setSessionCode] = useState('');
   const [mode, setMode] = useState('english'); // 'english' | 'hindi-urdu' | 'auto'
+  const [objective, setObjective] = useState('');
   const [status, setStatus] = useState('idle'); // idle | connecting | live | error | stopped
   const [meLines, setMeLines] = useState([]);
   const [othersLines, setOthersLines] = useState([]);
+  const [coaching, setCoaching] = useState(null);
   const [error, setError] = useState('');
   const [wsConnected, setWsConnected] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -48,6 +52,15 @@ export default function SessionPage() {
   const reconnectCount = useRef(0);
   const reconnectTimer = useRef(null);
   const liveStatus = useRef('idle'); // mirror of status for stale-closure-safe reads
+  const meetingIdRef = useRef(null); // DB meeting row ID for the current session
+  const meLinesRef = useRef([]);     // mirrors meLines for use in coaching interval
+  const othersLinesRef = useRef([]); // mirrors othersLines
+  const objectiveRef = useRef('');   // mirrors objective
+
+  // Keep transcript refs in sync
+  useEffect(() => { meLinesRef.current = meLines; }, [meLines]);
+  useEffect(() => { othersLinesRef.current = othersLines; }, [othersLines]);
+  useEffect(() => { objectiveRef.current = objective; }, [objective]);
 
   // Transcript auto-scroll
   const meScrollRef = useRef(null);
@@ -73,7 +86,7 @@ export default function SessionPage() {
     fetch(`${ENGINE_URL}/health`)
       .then(r => r.json())
       .then(d => setDeepgramAvailable(!!d.deepgramAvailable))
-      .catch(() => setDeepgramAvailable(false)); // treat network error as unavailable
+      .catch(() => setDeepgramAvailable(false));
   }, []);
 
   // Keep URL in sync if sessionCode changes
@@ -85,6 +98,30 @@ export default function SessionPage() {
       history.replaceState({}, '', u);
     }
   }, [sessionCode]);
+
+  // Coaching polling — runs every 25s while live
+  useEffect(() => {
+    if (status !== 'live') return;
+
+    const pollCoach = async () => {
+      const me = meLinesRef.current.map(l => l.cleaned);
+      const others = othersLinesRef.current.map(l => l.cleaned);
+      if (me.length + others.length < COACH_MIN_SEGMENTS) return;
+      try {
+        const res = await fetch(`${ENGINE_URL}/coach`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ me, others, objective: objectiveRef.current }),
+        });
+        const data = await res.json();
+        if (data.ok) setCoaching({ ...data, updatedAt: new Date().toLocaleTimeString() });
+      } catch (_) {}
+    };
+
+    pollCoach(); // immediate first poll
+    const timer = setInterval(pollCoach, COACH_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateStatus = useCallback((s) => {
     liveStatus.current = s;
@@ -109,17 +146,35 @@ export default function SessionPage() {
     setError('');
     setMeLines([]);
     setOthersLines([]);
+    setCoaching(null);
+
+    // Create a meeting record in the DB
+    try {
+      const meetingRes = await fetch('/api/meetings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: `Session ${sessionCode}`,
+          objective: objective || null,
+          language_mode: mode,
+        }),
+      });
+      if (meetingRes.ok) {
+        const meetingData = await meetingRes.json();
+        meetingIdRef.current = meetingData.id;
+      }
+    } catch (_) {
+      // Non-fatal: session continues without persistence
+      meetingIdRef.current = null;
+    }
 
     // openWs is defined here so its closure captures sessionCode and mode at call time.
-    // Defined as a named function so it can call itself recursively for reconnect.
     function openWs(code, sessionMode) {
       return new Promise((resolve, reject) => {
-        // Close any existing WS
         if (wsRef.current && wsRef.current.readyState < WebSocket.CLOSING) {
           try { wsRef.current.close(); } catch (_) {}
         }
 
-        // Build query string: always include mode; add lang hint when known
         const qs = new URLSearchParams({ mode: sessionMode });
         const langHint = MODE_LANG[sessionMode];
         if (langHint) qs.set('lang', langHint);
@@ -138,7 +193,6 @@ export default function SessionPage() {
           setWsConnected(true);
           setError('');
 
-          // Set persistent handlers now that connection is open
           ws.onmessage = (evt) => {
             try {
               const msg = JSON.parse(evt.data);
@@ -149,8 +203,21 @@ export default function SessionPage() {
                 } else {
                   setMeLines(p => [...p.slice(-200), line]);
                 }
+                // Persist segment to DB (fire-and-forget)
+                if (meetingIdRef.current) {
+                  const mId = meetingIdRef.current;
+                  fetch(`/api/meetings/${mId}/segments`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      speaker: msg.speaker,
+                      raw: msg.raw,
+                      cleaned: msg.cleaned || msg.raw,
+                      lang: MODE_LANG[sessionMode] || null,
+                    }),
+                  }).catch(() => {});
+                }
               } else if (msg.type === 'error' && msg.code === 'deepgram_unavailable') {
-                // Engine confirms Deepgram key is missing — show the real reason
                 setError(
                   'Hindi / Urdu mode is not enabled on this server. ' +
                   'Audio was received but not transcribed. Stop this session, switch to English mode, and try again.'
@@ -225,7 +292,7 @@ export default function SessionPage() {
       recorderRef.current = null;
       streamRef.current = null;
     }
-  }, [sessionCode, mode, deepgramAvailable, updateStatus]);
+  }, [sessionCode, mode, objective, deepgramAvailable, updateStatus]);
 
   const stopSession = useCallback(() => {
     intentionalStop.current = true;
@@ -240,6 +307,15 @@ export default function SessionPage() {
     streamRef.current = null;
     updateStatus('stopped');
     setWsConnected(false);
+
+    // Mark meeting as ended
+    if (meetingIdRef.current) {
+      fetch(`/api/meetings/${meetingIdRef.current}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ended_at: new Date().toISOString() }),
+      }).catch(() => {});
+    }
   }, [updateStatus]);
 
   const copyLink = useCallback(() => {
@@ -273,9 +349,10 @@ export default function SessionPage() {
         <div className="smc-toprow" style={styles.topbar}>
           <div>
             <div style={styles.brand}>Silent Meeting Copilot</div>
-            <a href="/" style={{ fontSize: 11, color: '#9aa0a6', textDecoration: 'none' }}>
-              &larr; Home
-            </a>
+            <div style={{ display: 'flex', gap: 12, marginTop: 2 }}>
+              <a href="/" style={styles.navLink}>&larr; Home</a>
+              <a href="/meetings" style={styles.navLink}>Past meetings</a>
+            </div>
           </div>
 
           {/* Session code box */}
@@ -305,7 +382,6 @@ export default function SessionPage() {
                   borderColor: deepgramBlocked ? '#92400e' : '#2a2f37',
                 }}
                 disabled={isLive || isConnecting}
-                title="Select the language for this meeting"
               >
                 <option value="english">English (fast)</option>
                 <option value="hindi-urdu">Hindi / Urdu (multilingual)</option>
@@ -334,7 +410,6 @@ export default function SessionPage() {
                 Start Session
               </button>
             )}
-            {/* Show Start disabled with reason when blocked */}
             {deepgramBlocked && !isLive && !isConnecting && (
               <button style={{ ...styles.btn, background: '#4b5563', minWidth: 120, cursor: 'not-allowed' }} disabled>
                 Start Session
@@ -348,7 +423,25 @@ export default function SessionPage() {
           </div>
         </div>
 
-        {/* Deepgram unavailable warning — shown when Hindi/Urdu selected but key not configured */}
+        {/* Objective input — shown before session starts */}
+        {!isLive && !isConnecting && (
+          <div style={styles.objectiveRow}>
+            <label style={styles.selectorLabel} htmlFor="objective">
+              Meeting objective (optional — enables coaching alignment notes)
+            </label>
+            <input
+              id="objective"
+              type="text"
+              value={objective}
+              onChange={e => setObjective(e.target.value)}
+              placeholder="e.g. Agree on project timeline and assign owners"
+              style={styles.objectiveInput}
+              maxLength={200}
+            />
+          </div>
+        )}
+
+        {/* Deepgram unavailable warning */}
         {deepgramBlocked && (
           <div style={styles.warnBox}>
             <strong>Hindi / Urdu mode is not currently enabled.</strong> The multilingual engine key has not been
@@ -357,7 +450,6 @@ export default function SessionPage() {
           </div>
         )}
 
-        {/* Deepgram availability checking notice */}
         {mode === 'hindi-urdu' && deepgramAvailable === null && (
           <div style={{ ...styles.warnBox, borderColor: '#1e3a5f', background: '#0c1f33', color: '#93c5fd' }}>
             Checking whether multilingual mode is available on this server…
@@ -405,6 +497,90 @@ export default function SessionPage() {
           </div>
         </div>
 
+        {/* Coaching panel — shown during and after live session */}
+        {(isLive || status === 'stopped') && (
+          <div style={styles.coachPanel}>
+            <div style={styles.coachHeader}>
+              <span style={styles.coachTitle}>Coaching</span>
+              {coaching?.updatedAt && (
+                <span style={styles.coachTs}>Updated {coaching.updatedAt}</span>
+              )}
+              {isLive && !coaching && (
+                <span style={styles.coachTs}>First update in ~{COACH_MIN_SEGMENTS} segments…</span>
+              )}
+            </div>
+
+            {coaching ? (
+              <div style={styles.coachBody}>
+                {/* Talk balance */}
+                <div style={styles.coachSection}>
+                  <div style={styles.coachSectionLabel}>Talk balance</div>
+                  <div style={styles.balanceRow}>
+                    <span style={{ ...styles.balanceLabel, color: '#22c55e' }}>
+                      You {coaching.talkBalance?.mePercent ?? 50}%
+                    </span>
+                    <div style={styles.balanceBar}>
+                      <div
+                        style={{
+                          ...styles.balanceFill,
+                          width: `${coaching.talkBalance?.mePercent ?? 50}%`,
+                        }}
+                      />
+                    </div>
+                    <span style={{ ...styles.balanceLabel, color: '#38bdf8' }}>
+                      Others {coaching.talkBalance?.othersPercent ?? 50}%
+                    </span>
+                  </div>
+                </div>
+
+                {/* Open items */}
+                {coaching.openItems?.length > 0 && (
+                  <div style={styles.coachSection}>
+                    <div style={styles.coachSectionLabel}>Open items from others</div>
+                    <ul style={styles.coachList}>
+                      {coaching.openItems.map((item, i) => (
+                        <li key={i} style={styles.coachItem}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {coaching.openItems?.length === 0 && (
+                  <div style={styles.coachSection}>
+                    <div style={styles.coachSectionLabel}>Open items from others</div>
+                    <div style={styles.coachNone}>None detected</div>
+                  </div>
+                )}
+
+                {/* Suggestions */}
+                {coaching.suggestions?.length > 0 && (
+                  <div style={styles.coachSection}>
+                    <div style={styles.coachSectionLabel}>Suggested responses</div>
+                    <ul style={styles.coachList}>
+                      {coaching.suggestions.map((s, i) => (
+                        <li key={i} style={{ ...styles.coachItem, color: '#fde68a' }}>{s}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Alignment note — only when objective was set */}
+                {coaching.alignment && (
+                  <div style={styles.coachSection}>
+                    <div style={styles.coachSectionLabel}>Objective alignment</div>
+                    <div style={styles.coachAlignment}>{coaching.alignment}</div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ padding: '12px 16px', color: '#9aa0a6', fontSize: 13 }}>
+                {isLive
+                  ? 'Coaching will appear after a few transcript segments are accumulated.'
+                  : 'No coaching data for this session.'}
+              </div>
+            )}
+          </div>
+        )}
+
         <div style={styles.foot}>
           Engine: {ENGINE_URL}&nbsp;&middot;&nbsp;
           WS:&nbsp;
@@ -415,6 +591,12 @@ export default function SessionPage() {
             <>
               &nbsp;&middot;&nbsp;
               <span style={{ color: '#2AB49F' }}>{MODE_LABEL[mode]}</span>
+            </>
+          )}
+          {meetingIdRef.current && (
+            <>
+              &nbsp;&middot;&nbsp;
+              <span style={{ color: '#9aa0a6' }}>recording</span>
             </>
           )}
         </div>
@@ -444,6 +626,7 @@ const styles = {
     gap: 12,
   },
   brand: { fontSize: 18, fontWeight: 600 },
+  navLink: { fontSize: 11, color: '#9aa0a6', textDecoration: 'none' },
   codeBox: {
     display: 'flex',
     alignItems: 'center',
@@ -491,6 +674,21 @@ const styles = {
     color: '#fff',
     cursor: 'pointer',
   },
+  objectiveRow: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+  },
+  objectiveInput: {
+    background: '#1a1d24',
+    border: '1px solid #2a2f37',
+    color: '#e6e8eb',
+    borderRadius: 8,
+    padding: '8px 12px',
+    fontSize: 13,
+    width: '100%',
+    outline: 'none',
+  },
   warnBox: {
     background: '#1c1007',
     border: '1px solid #92400e',
@@ -536,5 +734,71 @@ const styles = {
   line: { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'baseline' },
   ts: { fontSize: 10, color: '#9aa0a6', flexShrink: 0 },
   hint: { fontSize: 10, color: '#9aa0a6', cursor: 'help' },
+  // Coaching panel
+  coachPanel: {
+    background: '#13111c',
+    border: '1px solid #3b2f6e',
+    borderRadius: 12,
+  },
+  coachHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    padding: '10px 16px',
+    borderBottom: '1px solid #3b2f6e',
+  },
+  coachTitle: { fontSize: 13, fontWeight: 600, color: '#a78bfa' },
+  coachTs: { fontSize: 11, color: '#6b7280' },
+  coachBody: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 0,
+  },
+  coachSection: {
+    flex: '1 1 220px',
+    padding: '12px 16px',
+    borderRight: '1px solid #1f1a30',
+    borderBottom: '1px solid #1f1a30',
+  },
+  coachSectionLabel: {
+    fontSize: 10,
+    color: '#6b7280',
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+    marginBottom: 6,
+  },
+  balanceRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+  },
+  balanceLabel: { fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', minWidth: 60 },
+  balanceBar: {
+    flex: 1,
+    height: 8,
+    background: '#2a2f37',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  balanceFill: {
+    height: '100%',
+    background: 'linear-gradient(to right, #22c55e, #38bdf8)',
+    borderRadius: 4,
+    transition: 'width 0.6s ease',
+  },
+  coachList: {
+    margin: 0,
+    paddingLeft: 16,
+    fontSize: 13,
+    lineHeight: 1.6,
+    color: '#d1d5db',
+  },
+  coachItem: { marginBottom: 4 },
+  coachNone: { fontSize: 13, color: '#6b7280', fontStyle: 'italic' },
+  coachAlignment: {
+    fontSize: 13,
+    color: '#fbbf24',
+    lineHeight: 1.5,
+  },
   foot: { fontSize: 11, color: '#9aa0a6', textAlign: 'center' },
 };
