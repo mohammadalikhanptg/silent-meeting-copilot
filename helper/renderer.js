@@ -2,6 +2,7 @@
 
 const logEl = document.getElementById('log');
 const micSel = document.getElementById('micSel');
+const sessionInput = document.getElementById('sessionInput');
 const startBtn = document.getElementById('startBtn');
 const stopBtn = document.getElementById('stopBtn');
 const statusDot = document.getElementById('statusDot');
@@ -21,7 +22,15 @@ let analyserCtxMe = null;
 let analyserCtxOt = null;
 let rafId = null;
 let engineUrl = '';
-let sessionId = `s-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+let sessionId = '';
+
+// Short human-readable code matching the browser format: 3 letters + 4 digits
+function generateShortCode() {
+  const chars = 'abcdefghjkmnpqrstuvwxyz';
+  const letters = Array.from({ length: 3 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  const digits = String(Math.floor(Math.random() * 9000) + 1000);
+  return `${letters}-${digits}`;
+}
 
 function log(msg) {
   const t = new Date().toLocaleTimeString();
@@ -104,11 +113,24 @@ async function start() {
   startBtn.disabled = true;
   setStatus('connecting');
 
+  // Use the code from the input field, or generate a new one
+  const inputVal = sessionInput.value.trim();
+  sessionId = inputVal || generateShortCode();
+  sessionInput.value = sessionId; // display the active code
+  sessionInput.disabled = true;
+
+  log(`Session code: ${sessionId}`);
+  if (!inputVal) {
+    log('No code entered — generated a new session. Share this code with the browser session page.');
+  } else {
+    log('Using existing session code. Browser session page should use the same code.');
+  }
+
   try {
     await openWebSocket();
     setStatus('live');
 
-    // ME channel — default microphone
+    // ME channel — selected or default microphone
     const micId = micSel.value;
     micStream = await navigator.mediaDevices.getUserMedia({
       audio: micId ? { deviceId: { exact: micId } } : { sampleRate: 16000, channelCount: 1 },
@@ -141,11 +163,11 @@ async function start() {
     }
     drawMeters();
 
-    // MediaRecorder for ME
     const meMime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
       ? 'audio/webm;codecs=opus'
       : 'audio/ogg;codecs=opus';
 
+    // MediaRecorder for ME channel
     micRecorder = new MediaRecorder(micStream, { mimeType: meMime });
     micRecorder.ondataavailable = async (evt) => {
       if (!evt.data || evt.data.size < 100) return;
@@ -157,7 +179,7 @@ async function start() {
     micRecorder.start(CHUNK_MS);
     log(`ME recorder started (${meMime}, ${CHUNK_MS}ms chunks).`);
 
-    // MediaRecorder for OTHERS (if loopback available)
+    // MediaRecorder for OTHERS channel (if loopback available)
     if (othersStream.getAudioTracks().length > 0) {
       othersRecorder = new MediaRecorder(othersStream, { mimeType: meMime });
       othersRecorder.ondataavailable = async (evt) => {
@@ -201,6 +223,8 @@ function stop() {
   barMe.style.width = '0';
   barOt.style.width = '0';
 
+  sessionInput.disabled = false;
+
   setStatus('idle');
   startBtn.disabled = false;
   stopBtn.disabled = true;
@@ -230,10 +254,10 @@ async function listDevices() {
     const config = await window.smc.getConfig();
     engineUrl = config.engineUrl;
     engineUrlEl.textContent = 'Engine: ' + engineUrl;
-    sessionId = `s-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    log(`SMC Helper started. Session: ${sessionId}`);
+    log('SMC Helper started.');
     log('Engine: ' + engineUrl);
     log(`Electron ${window.smc.versions.electron} / Chromium ${window.smc.versions.chrome}`);
+    log('Enter a session code above (from the browser page) then click Start.');
   } catch (err) {
     log('Config load error: ' + err);
   }

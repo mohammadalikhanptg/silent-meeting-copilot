@@ -25,8 +25,11 @@
     .bar.me span { background:var(--green); }
     .bar.ot span { background:var(--blue); }
     .log { flex:1;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:8px;overflow-y:auto;font-size:11px;line-height:1.6;color:var(--muted);font-family:monospace;white-space:pre-wrap;min-height:80px; }
-    select { background:var(--panel);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 8px;font-size:12px; }
+    select,input[type=text] { background:var(--panel);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 8px;font-size:12px; }
+    input[type=text]::placeholder { color:var(--muted); }
+    input[type=text]:disabled { opacity:0.5; }
     .url { font-size:10px;color:var(--muted);word-break:break-all; }
+    .code-hint { font-size:10px;color:var(--muted);margin-top:2px; }
   </style>
 </head>
 <body>
@@ -36,9 +39,20 @@
     </div>
 
     <div class="row">
+      <label style="font-size:11px;color:var(--muted);white-space:nowrap">Session code:</label>
+      <input
+        id="sessionInput"
+        type="text"
+        placeholder="e.g. drk-8421  (leave empty to generate)"
+        style="flex:1;font-family:monospace;letter-spacing:0.05em;"
+      />
+    </div>
+    <div class="code-hint">Enter the session code shown in the browser — both devices will share the same session.</div>
+
+    <div class="row">
       <label style="font-size:11px;color:var(--muted)">Microphone:</label>
       <select id="micSel" style="flex:1"></select>
-      <button id="refreshBtn" onclick="listDevices()">↻</button>
+      <button id="refreshBtn" onclick="listDevices()">&#8635;</button>
     </div>
 
     <div class="row">

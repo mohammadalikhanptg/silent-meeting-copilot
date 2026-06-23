@@ -1,5 +1,5 @@
 // Durable Object: one instance per session, manages WebSocket connections
-// and accumulates audio chunks before sending to Whisper.
+// and accumulates audio chunks before sending to the STT provider.
 export class SessionDO {
   constructor(state, env) {
     this.state = state;
@@ -8,11 +8,10 @@ export class SessionDO {
     // Accumulate audio bytes per speaker until flush threshold
     this.buffers = { me: [], others: [] };
     this.FLUSH_BYTES = 64 * 1024; // flush after ~64 KB of audio per channel
+    this.lang = null; // language hint set on WS connect or via config message
   }
 
   async fetch(request) {
-    const url = new URL(request.url);
-
     if (request.headers.get('Upgrade') === 'websocket') {
       return this._handleWebSocket(request);
     }
@@ -20,6 +19,11 @@ export class SessionDO {
   }
 
   async _handleWebSocket(request) {
+    // Accept optional ?lang= hint from connecting client
+    const url = new URL(request.url);
+    const lang = url.searchParams.get('lang') || null;
+    if (lang) this.lang = lang;
+
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.state.acceptWebSocket(server);
@@ -30,11 +34,13 @@ export class SessionDO {
   // Called by the Workers runtime when a message arrives on any accepted WebSocket.
   async webSocketMessage(ws, message) {
     try {
-      // Binary frames are audio chunks; text frames are control messages.
+      // Text frames are control messages; binary frames are audio chunks.
       if (typeof message === 'string') {
         const ctrl = JSON.parse(message);
         if (ctrl.type === 'flush') {
           await this._flushChannel(ctrl.speaker || 'me');
+        } else if (ctrl.type === 'config') {
+          if (ctrl.lang !== undefined) this.lang = ctrl.lang || null;
         }
         return;
       }
@@ -83,7 +89,7 @@ export class SessionDO {
       offset += chunk.length;
     }
 
-    const result = await transcribeAndClean(combined, this.env);
+    const result = await transcribeAndClean(combined, this.env, this.lang);
     if (result.raw) {
       this._broadcast({ type: 'transcript', speaker, ...result });
     }
@@ -97,19 +103,62 @@ export class SessionDO {
   }
 }
 
-// Shared transcription + cleanup logic used by both DO and POST /transcribe
-// Confirmed working models (probed 2026-06-23):
-//   ASR: @cf/openai/whisper (multilingual, number-array input)
-//   LLM: @cf/meta/llama-3.2-3b-instruct (llama-3.1 and 3 deprecated 2026-05-30)
-export async function transcribeAndClean(audioBytes, env) {
-  const whisperResult = await env.AI.run('@cf/openai/whisper', {
-    audio: [...audioBytes],
+// Deepgram prerecorded REST transcription (nova-2, multilingual including Hindi/Urdu).
+// Only called when env.DEEPGRAM_API_KEY is set.
+// To enable: wrangler secret put DEEPGRAM_API_KEY  (then enter your key)
+async function transcribeDeepgram(audioBytes, apiKey, lang) {
+  const params = new URLSearchParams({ model: 'nova-2', smart_format: 'true' });
+  if (lang) {
+    params.set('language', lang);
+  } else {
+    params.set('detect_language', 'true');
+  }
+
+  const resp = await fetch(`https://api.deepgram.com/v1/listen?${params}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Token ${apiKey}`,
+      'Content-Type': 'application/octet-stream',
+    },
+    body: audioBytes,
   });
 
-  const raw = (whisperResult.text || '').trim();
-  if (!raw) return { raw: '', cleaned: '' };
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => '');
+    throw new Error(`Deepgram error ${resp.status}: ${body}`);
+  }
 
-  // LLM cleanup pass: fix punctuation and grammar, preserve language.
+  const data = await resp.json();
+  const transcript = data?.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
+  return transcript.trim();
+}
+
+// Shared transcription + cleanup used by both SessionDO and POST /transcribe.
+//
+// Provider selection (automatic):
+//   DEEPGRAM_API_KEY present in Worker env → Deepgram nova-2 (better multilingual, Hindi/Urdu)
+//   No key                                 → Cloudflare Workers AI Whisper (free, default)
+//
+// Confirmed working Cloudflare models (probed 2026-06-23):
+//   ASR: @cf/openai/whisper               (multilingual base, number-array input)
+//   LLM: @cf/meta/llama-3.2-3b-instruct   (llama-3.1 deprecated 2026-05-30)
+export async function transcribeAndClean(audioBytes, env, lang = null) {
+  const provider = env.DEEPGRAM_API_KEY ? 'deepgram' : 'cloudflare';
+  let raw = '';
+
+  if (provider === 'deepgram') {
+    raw = await transcribeDeepgram(audioBytes, env.DEEPGRAM_API_KEY, lang);
+  } else {
+    // Cloudflare Workers AI Whisper — input must be a number array
+    const input = { audio: [...audioBytes] };
+    if (lang) input.language = lang;
+    const result = await env.AI.run('@cf/openai/whisper', input);
+    raw = (result.text || '').trim();
+  }
+
+  if (!raw) return { raw: '', cleaned: '', provider };
+
+  // LLM cleanup pass: fix punctuation/capitalisation, preserve original language.
   const llmResult = await env.AI.run('@cf/meta/llama-3.2-3b-instruct', {
     messages: [
       {
@@ -123,5 +172,5 @@ export async function transcribeAndClean(audioBytes, env) {
   });
 
   const cleaned = (llmResult.response || raw).trim();
-  return { raw, cleaned };
+  return { raw, cleaned, provider };
 }

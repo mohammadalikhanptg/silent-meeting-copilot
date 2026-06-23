@@ -3,87 +3,164 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 
 const ENGINE_URL = process.env.NEXT_PUBLIC_ENGINE_URL || 'https://smc-engine.ali-6b8.workers.dev';
-const CHUNK_MS = 2500; // send audio every 2.5 seconds
+const CHUNK_MS = 2500;
+const MAX_RECONNECTS = 5;
 
-function generateSessionId() {
-  return `s-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+// Short human-readable code: 3 letters + 4 digits, e.g. "drk-8421"
+function generateShortCode() {
+  const chars = 'abcdefghjkmnpqrstuvwxyz';
+  const letters = Array.from({ length: 3 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  const digits = String(Math.floor(Math.random() * 9000) + 1000);
+  return `${letters}-${digits}`;
 }
 
-// Encode binary audio chunk: first byte = speaker (0=me, 1=others)
+// Encode audio chunk: first byte = speaker (0=me, 1=others), rest = audio
 function encodeChunk(speaker, audioBuffer) {
-  const speakerByte = speaker === 'others' ? 1 : 0;
-  const combined = new Uint8Array(1 + audioBuffer.byteLength);
-  combined[0] = speakerByte;
-  combined.set(new Uint8Array(audioBuffer), 1);
-  return combined.buffer;
+  const out = new Uint8Array(1 + audioBuffer.byteLength);
+  out[0] = speaker === 'others' ? 1 : 0;
+  out.set(new Uint8Array(audioBuffer), 1);
+  return out.buffer;
 }
 
 export default function SessionPage() {
+  // Session code starts empty to avoid SSR hydration mismatch; set in useEffect
+  const [sessionCode, setSessionCode] = useState('');
+  const [lang, setLang] = useState('');
   const [status, setStatus] = useState('idle'); // idle | connecting | live | error | stopped
-  const [sessionId] = useState(generateSessionId);
   const [meLines, setMeLines] = useState([]);
   const [othersLines, setOthersLines] = useState([]);
   const [error, setError] = useState('');
   const [wsConnected, setWsConnected] = useState(false);
+  const [copied, setCopied] = useState(false);
 
+  // Mutable refs — stable across renders, safe to use inside WS callbacks
   const wsRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
+  const recorderRef = useRef(null);
   const streamRef = useRef(null);
-  const meTranscriptRef = useRef(null);
-  const othersTranscriptRef = useRef(null);
+  const intentionalStop = useRef(false);
+  const reconnectCount = useRef(0);
+  const reconnectTimer = useRef(null);
+  const liveStatus = useRef('idle'); // mirror of status for stale-closure-safe reads
 
-  const appendLine = useCallback((speaker, raw, cleaned) => {
-    const line = { raw, cleaned, ts: new Date().toLocaleTimeString() };
-    if (speaker === 'me') {
-      setMeLines(prev => [...prev.slice(-200), line]);
-    } else {
-      setOthersLines(prev => [...prev.slice(-200), line]);
+  // Transcript auto-scroll
+  const meScrollRef = useRef(null);
+  const otScrollRef = useRef(null);
+  useEffect(() => { meScrollRef.current?.scrollTo(0, meScrollRef.current.scrollHeight); }, [meLines]);
+  useEffect(() => { otScrollRef.current?.scrollTo(0, otScrollRef.current.scrollHeight); }, [othersLines]);
+
+  // On mount: read ?s= from URL or generate a new code and write it to URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const urlCode = params.get('s');
+    const code = urlCode || generateShortCode();
+    setSessionCode(code);
+    if (!urlCode) {
+      const u = new URL(window.location.href);
+      u.searchParams.set('s', code);
+      history.replaceState({}, '', u);
     }
   }, []);
 
-  // Auto-scroll transcripts
+  // Keep URL in sync if sessionCode changes
   useEffect(() => {
-    meTranscriptRef.current?.scrollTo(0, meTranscriptRef.current.scrollHeight);
-  }, [meLines]);
-  useEffect(() => {
-    othersTranscriptRef.current?.scrollTo(0, othersTranscriptRef.current.scrollHeight);
-  }, [othersLines]);
+    if (!sessionCode) return;
+    const u = new URL(window.location.href);
+    if (u.searchParams.get('s') !== sessionCode) {
+      u.searchParams.set('s', sessionCode);
+      history.replaceState({}, '', u);
+    }
+  }, [sessionCode]);
+
+  const updateStatus = useCallback((s) => {
+    liveStatus.current = s;
+    setStatus(s);
+  }, []);
 
   const startSession = useCallback(async () => {
-    setStatus('connecting');
+    if (!sessionCode) return;
+
+    intentionalStop.current = false;
+    reconnectCount.current = 0;
+    updateStatus('connecting');
     setError('');
     setMeLines([]);
     setOthersLines([]);
 
-    try {
-      // 1. Open WebSocket to engine
-      const wsUrl = ENGINE_URL.replace(/^http/, 'ws') + `/session/${sessionId}/ws`;
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
+    // openWs is defined here so its closure captures sessionCode and lang at call time.
+    // Defined as a named function so it can call itself recursively for reconnect.
+    function openWs(code, langHint) {
+      return new Promise((resolve, reject) => {
+        // Close any existing WS
+        if (wsRef.current && wsRef.current.readyState < WebSocket.CLOSING) {
+          try { wsRef.current.close(); } catch (_) {}
+        }
 
-      await new Promise((resolve, reject) => {
-        ws.onopen = resolve;
-        ws.onerror = () => reject(new Error('WebSocket connection failed'));
-        setTimeout(() => reject(new Error('WebSocket timeout')), 10000);
-      });
-      setWsConnected(true);
+        const qs = langHint ? `?lang=${encodeURIComponent(langHint)}` : '';
+        const wsUrl = ENGINE_URL.replace(/^http/, 'ws') + `/session/${code}/ws${qs}`;
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+        let settled = false;
 
-      ws.onmessage = (evt) => {
-        try {
-          const msg = JSON.parse(evt.data);
-          if (msg.type === 'transcript' && msg.raw) {
-            appendLine(msg.speaker || 'me', msg.raw, msg.cleaned || msg.raw);
+        const timeout = setTimeout(() => {
+          if (!settled) { settled = true; reject(new Error('WebSocket timeout')); }
+        }, 10000);
+
+        ws.onopen = () => {
+          if (!settled) { settled = true; clearTimeout(timeout); }
+          reconnectCount.current = 0;
+          setWsConnected(true);
+          setError('');
+
+          // Set persistent handlers now that connection is open
+          ws.onmessage = (evt) => {
+            try {
+              const msg = JSON.parse(evt.data);
+              if (msg.type === 'transcript' && msg.raw) {
+                const line = { raw: msg.raw, cleaned: msg.cleaned || msg.raw, ts: new Date().toLocaleTimeString() };
+                if (msg.speaker === 'others') {
+                  setOthersLines(p => [...p.slice(-200), line]);
+                } else {
+                  setMeLines(p => [...p.slice(-200), line]);
+                }
+              }
+            } catch (_) {}
+          };
+
+          ws.onclose = () => {
+            setWsConnected(false);
+            if (intentionalStop.current || liveStatus.current !== 'live') return;
+            if (reconnectCount.current >= MAX_RECONNECTS) {
+              setError('Connection lost. Max reconnect attempts reached.');
+              liveStatus.current = 'error';
+              setStatus('error');
+              return;
+            }
+            const n = reconnectCount.current++;
+            const delay = Math.min(1000 * Math.pow(2, n), 30000);
+            setError(`Connection lost. Reconnecting in ${Math.round(delay / 1000)}s… (${reconnectCount.current}/${MAX_RECONNECTS})`);
+            reconnectTimer.current = setTimeout(() => {
+              if (!intentionalStop.current) openWs(code, langHint).catch(() => {});
+            }, delay);
+          };
+
+          ws.onerror = () => setError('WebSocket error – will reconnect.');
+
+          resolve();
+        };
+
+        ws.onerror = () => {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timeout);
+            reject(new Error('WebSocket connection failed'));
           }
-        } catch (_) {}
-      };
-      ws.onerror = () => {
-        setError('WebSocket error. Session may continue via chunked mode.');
-      };
-      ws.onclose = () => {
-        setWsConnected(false);
-      };
+        };
+      });
+    }
 
-      // 2. Capture microphone (ME channel)
+    try {
+      await openWs(sessionCode, lang);
+
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true },
       });
@@ -94,107 +171,182 @@ export default function SessionPage() {
         : 'audio/ogg;codecs=opus';
 
       const recorder = new MediaRecorder(stream, { mimeType });
-      mediaRecorderRef.current = recorder;
+      recorderRef.current = recorder;
 
       recorder.ondataavailable = async (evt) => {
         if (!evt.data || evt.data.size < 100) return;
-        const arrayBuf = await evt.data.arrayBuffer();
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(encodeChunk('me', arrayBuf));
+        const buf = await evt.data.arrayBuffer();
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(encodeChunk('me', buf));
         }
       };
 
       recorder.start(CHUNK_MS);
-      setStatus('live');
+      updateStatus('live');
     } catch (err) {
       setError(String(err));
-      setStatus('error');
-      stopSession();
+      updateStatus('error');
+      recorderRef.current?.stop();
+      streamRef.current?.getTracks().forEach(t => t.stop());
+      wsRef.current = null;
+      recorderRef.current = null;
+      streamRef.current = null;
     }
-  }, [sessionId, appendLine]);
+  }, [sessionCode, lang, updateStatus]);
 
   const stopSession = useCallback(() => {
-    mediaRecorderRef.current?.stop();
+    intentionalStop.current = true;
+    if (reconnectTimer.current) { clearTimeout(reconnectTimer.current); reconnectTimer.current = null; }
+    recorderRef.current?.stop();
     streamRef.current?.getTracks().forEach(t => t.stop());
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.close();
+    if (wsRef.current && wsRef.current.readyState < WebSocket.CLOSING) {
+      try { wsRef.current.close(); } catch (_) {}
     }
     wsRef.current = null;
-    mediaRecorderRef.current = null;
+    recorderRef.current = null;
     streamRef.current = null;
-    setStatus('stopped');
+    updateStatus('stopped');
     setWsConnected(false);
-  }, []);
+  }, [updateStatus]);
+
+  const copyLink = useCallback(() => {
+    if (!sessionCode) return;
+    const u = new URL(window.location.href);
+    u.searchParams.set('s', sessionCode);
+    navigator.clipboard.writeText(u.toString()).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }).catch(() => {});
+  }, [sessionCode]);
 
   const isLive = status === 'live';
   const isConnecting = status === 'connecting';
+  const canStart = !isLive && !isConnecting;
 
   return (
-    <div style={styles.root}>
-      <div style={styles.topbar}>
-        <div>
-          <div style={styles.brand}>Silent Meeting Copilot</div>
-          <div style={styles.sub}>Session {sessionId}</div>
+    <>
+      <style>{`
+        @media (max-width: 760px) {
+          .smc-grid { grid-template-columns: 1fr !important; }
+          .smc-toprow { flex-direction: column; align-items: flex-start !important; }
+          .smc-controls { flex-wrap: wrap; }
+        }
+        * { box-sizing: border-box; }
+      `}</style>
+      <div style={styles.root}>
+
+        {/* Top bar */}
+        <div className="smc-toprow" style={styles.topbar}>
+          <div>
+            <div style={styles.brand}>Silent Meeting Copilot</div>
+            <a href="/" style={{ fontSize: 11, color: '#9aa0a6', textDecoration: 'none' }}>
+              &larr; Home
+            </a>
+          </div>
+
+          {/* Session code box */}
+          <div style={styles.codeBox}>
+            <span style={styles.codeLabel}>Session&nbsp;code</span>
+            <code style={styles.code}>{sessionCode || '…'}</code>
+            <button
+              onClick={copyLink}
+              style={{ ...styles.smallBtn, background: copied ? '#166534' : '#2a2f37' }}
+              title="Copy shareable session link"
+            >
+              {copied ? '✓ Copied' : 'Copy link'}
+            </button>
+          </div>
+
+          {/* Controls */}
+          <div className="smc-controls" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <select
+              value={lang}
+              onChange={e => setLang(e.target.value)}
+              style={styles.select}
+              disabled={isLive || isConnecting}
+              title="Language hint for transcription"
+            >
+              <option value="">Auto-detect language</option>
+              <option value="en">English</option>
+              <option value="hi">Hindi / हिन्दी</option>
+              <option value="ur">Urdu / اردو</option>
+              <option value="es">Spanish</option>
+              <option value="fr">French</option>
+              <option value="de">German</option>
+              <option value="zh">Chinese</option>
+              <option value="ar">Arabic</option>
+            </select>
+            <span style={{ ...styles.dot, background: isLive ? '#22c55e' : isConnecting ? '#facc15' : '#6b7280' }} />
+            <span style={styles.statusText}>
+              {isLive ? 'Live' : isConnecting ? 'Connecting…' : status === 'stopped' ? 'Stopped' : 'Ready'}
+            </span>
+            {canStart && (
+              <button
+                onClick={startSession}
+                style={{ ...styles.btn, background: '#2AB49F', minWidth: 120 }}
+                disabled={!sessionCode}
+              >
+                Start Session
+              </button>
+            )}
+            {(isLive || isConnecting) && (
+              <button onClick={stopSession} style={{ ...styles.btn, background: '#ef4444', minWidth: 80 }}>
+                Stop
+              </button>
+            )}
+          </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ ...styles.dot, background: isLive ? '#22c55e' : isConnecting ? '#facc15' : '#6b7280' }} />
-          <span style={styles.statusText}>
-            {isLive ? 'Live' : isConnecting ? 'Connecting…' : status === 'stopped' ? 'Stopped' : 'Ready'}
+
+        {error && <div style={styles.errorBox}>{error}</div>}
+
+        {/* Transcript panels */}
+        <div className="smc-grid" style={styles.grid}>
+          <div style={{ ...styles.panel, borderColor: '#22c55e' }}>
+            <div style={{ ...styles.panelHead, color: '#22c55e' }}>ME — microphone</div>
+            <div ref={meScrollRef} style={styles.transcript}>
+              {meLines.length === 0 && (
+                <span style={styles.muted}>Your speech will appear here…</span>
+              )}
+              {meLines.map((l, i) => (
+                <div key={i} style={styles.line}>
+                  <span style={styles.ts}>{l.ts}</span>
+                  <span>{l.cleaned}</span>
+                  {l.raw !== l.cleaned && (
+                    <span style={styles.hint} title={l.raw}> [raw differs]</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ ...styles.panel, borderColor: '#38bdf8' }}>
+            <div style={{ ...styles.panelHead, color: '#38bdf8' }}>OTHERS — system audio</div>
+            <div ref={otScrollRef} style={styles.transcript}>
+              {othersLines.length === 0 && (
+                <span style={styles.muted}>
+                  Others&apos; speech appears here via the desktop helper.<br />
+                  Share code <strong style={{ color: '#2AB49F' }}>{sessionCode || '…'}</strong> or use Copy link above.
+                </span>
+              )}
+              {othersLines.map((l, i) => (
+                <div key={i} style={styles.line}>
+                  <span style={styles.ts}>{l.ts}</span>
+                  <span>{l.cleaned}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div style={styles.foot}>
+          Engine: {ENGINE_URL}&nbsp;&middot;&nbsp;
+          WS:&nbsp;
+          <span style={{ color: wsConnected ? '#22c55e' : '#9aa0a6' }}>
+            {wsConnected ? 'connected' : 'disconnected'}
           </span>
-          {!isLive && !isConnecting && (
-            <button onClick={startSession} style={{ ...styles.btn, background: '#2AB49F' }}>
-              Start Session
-            </button>
-          )}
-          {(isLive || isConnecting) && (
-            <button onClick={stopSession} style={{ ...styles.btn, background: '#ef4444' }}>
-              Stop
-            </button>
-          )}
         </div>
       </div>
-
-      {error && <div style={styles.error}>{error}</div>}
-
-      <div style={styles.grid}>
-        <div style={{ ...styles.panel, borderColor: '#22c55e' }}>
-          <div style={{ ...styles.panelHead, color: '#22c55e' }}>ME (microphone)</div>
-          <div ref={meTranscriptRef} style={styles.transcript}>
-            {meLines.length === 0 && (
-              <span style={styles.muted}>Your speech will appear here…</span>
-            )}
-            {meLines.map((l, i) => (
-              <div key={i} style={styles.line}>
-                <span style={styles.ts}>{l.ts}</span>
-                <span>{l.cleaned}</span>
-                {l.raw !== l.cleaned && (
-                  <span style={styles.rawHint} title={l.raw}> [raw differs]</span>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div style={{ ...styles.panel, borderColor: '#38bdf8' }}>
-          <div style={{ ...styles.panelHead, color: '#38bdf8' }}>OTHERS (system audio)</div>
-          <div ref={othersTranscriptRef} style={styles.transcript}>
-            {othersLines.length === 0 && (
-              <span style={styles.muted}>Others' speech will appear here (via Windows desktop helper)…</span>
-            )}
-            {othersLines.map((l, i) => (
-              <div key={i} style={styles.line}>
-                <span style={styles.ts}>{l.ts}</span>
-                <span>{l.cleaned}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div style={styles.foot}>
-        Engine: {ENGINE_URL} &nbsp;·&nbsp; WebSocket: {wsConnected ? 'connected' : 'disconnected'}
-      </div>
-    </div>
+    </>
   );
 }
 
@@ -203,14 +355,13 @@ const styles = {
     minHeight: '100vh',
     background: '#0f1115',
     color: '#e6e8eb',
-    fontFamily: '"Segoe UI", system-ui, -apple-system, sans-serif',
+    fontFamily: '"Segoe UI",system-ui,-apple-system,sans-serif',
     display: 'flex',
     flexDirection: 'column',
     padding: 16,
     gap: 14,
     maxWidth: 1200,
     margin: '0 auto',
-    boxSizing: 'border-box',
   },
   topbar: {
     display: 'flex',
@@ -219,36 +370,54 @@ const styles = {
     justifyContent: 'space-between',
     gap: 12,
   },
-  brand: {
-    fontSize: 18,
-    fontWeight: 600,
-    color: '#e6e8eb',
+  brand: { fontSize: 18, fontWeight: 600 },
+  codeBox: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    background: '#1a1d24',
+    border: '1px solid #2a2f37',
+    borderRadius: 8,
+    padding: '6px 12px',
   },
-  sub: {
+  codeLabel: { fontSize: 11, color: '#9aa0a6', whiteSpace: 'nowrap' },
+  code: {
+    fontSize: 17,
+    fontWeight: 700,
+    letterSpacing: '0.08em',
+    color: '#2AB49F',
+    fontFamily: 'monospace',
+  },
+  smallBtn: {
+    border: 'none',
+    borderRadius: 6,
+    padding: '4px 10px',
     fontSize: 11,
-    color: '#9aa0a6',
-    marginTop: 2,
+    fontWeight: 600,
+    color: '#fff',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
   },
-  dot: {
-    width: 9,
-    height: 9,
-    borderRadius: '50%',
-    display: 'inline-block',
+  select: {
+    background: '#1a1d24',
+    border: '1px solid #2a2f37',
+    color: '#e6e8eb',
+    borderRadius: 6,
+    padding: '6px 10px',
+    fontSize: 12,
   },
-  statusText: {
-    fontSize: 13,
-    color: '#9aa0a6',
-  },
+  dot: { width: 9, height: 9, borderRadius: '50%', display: 'inline-block', flexShrink: 0 },
+  statusText: { fontSize: 13, color: '#9aa0a6', whiteSpace: 'nowrap' },
   btn: {
     border: 'none',
     borderRadius: 8,
-    padding: '7px 16px',
+    padding: '8px 18px',
     fontSize: 13,
     fontWeight: 600,
     color: '#fff',
     cursor: 'pointer',
   },
-  error: {
+  errorBox: {
     background: '#2d1010',
     border: '1px solid #7f1d1d',
     borderRadius: 8,
@@ -271,11 +440,7 @@ const styles = {
     flexDirection: 'column',
     minHeight: 300,
   },
-  panelHead: {
-    fontSize: 13,
-    fontWeight: 600,
-    marginBottom: 8,
-  },
+  panelHead: { fontSize: 13, fontWeight: 600, marginBottom: 8 },
   transcript: {
     flex: 1,
     overflowY: 'auto',
@@ -285,29 +450,9 @@ const styles = {
     flexDirection: 'column',
     gap: 6,
   },
-  muted: {
-    color: '#9aa0a6',
-    fontStyle: 'italic',
-  },
-  line: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: 6,
-    alignItems: 'baseline',
-  },
-  ts: {
-    fontSize: 10,
-    color: '#9aa0a6',
-    flexShrink: 0,
-  },
-  rawHint: {
-    fontSize: 10,
-    color: '#9aa0a6',
-    cursor: 'help',
-  },
-  foot: {
-    fontSize: 11,
-    color: '#9aa0a6',
-    textAlign: 'center',
-  },
+  muted: { color: '#9aa0a6', fontStyle: 'italic' },
+  line: { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'baseline' },
+  ts: { fontSize: 10, color: '#9aa0a6', flexShrink: 0 },
+  hint: { fontSize: 10, color: '#9aa0a6', cursor: 'help' },
+  foot: { fontSize: 11, color: '#9aa0a6', textAlign: 'center' },
 };

@@ -22,12 +22,14 @@ export default {
 
     if (request.method === 'OPTIONS') return cors(null, 204);
 
-    // Health check
+    // Health check — reports active provider
     if (url.pathname === '/health') {
-      return json({ ok: true, ts: Date.now() });
+      const provider = env.DEEPGRAM_API_KEY ? 'deepgram' : 'cloudflare';
+      return json({ ok: true, ts: Date.now(), provider });
     }
 
-    // POST /transcribe — one-shot audio file transcription for testing
+    // POST /transcribe — one-shot audio transcription for testing
+    // Optional query params: ?lang=hi (language hint), otherwise auto-detect
     if (url.pathname === '/transcribe' && request.method === 'POST') {
       try {
         const buf = await request.arrayBuffer();
@@ -35,7 +37,8 @@ export default {
           return json({ error: 'Empty audio body' }, 400);
         }
         const audioBytes = new Uint8Array(buf);
-        const result = await transcribeAndClean(audioBytes, env);
+        const lang = url.searchParams.get('lang') || null;
+        const result = await transcribeAndClean(audioBytes, env, lang);
         return json({ ok: true, ...result });
       } catch (err) {
         console.error('Transcribe error:', err);
@@ -44,6 +47,7 @@ export default {
     }
 
     // GET /session/:id/ws — WebSocket upgrade routed to Durable Object
+    // Optional query params: ?lang=hi (language hint for this session)
     const wsMatch = url.pathname.match(/^\/session\/([^/]+)\/ws$/);
     if (wsMatch) {
       if (request.headers.get('Upgrade') !== 'websocket') {
