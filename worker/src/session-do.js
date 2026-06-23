@@ -110,8 +110,8 @@ export class SessionDO {
 
   _broadcast(msg) {
     const text = JSON.stringify(msg);
-    for (const ws of this.sockets) {
-      try { ws.send(text); } catch (_) { this.sockets.delete(ws); }
+    for (const ws of this.state.getWebSockets()) {
+      try { ws.send(text); } catch (_) {}
     }
   }
 }
