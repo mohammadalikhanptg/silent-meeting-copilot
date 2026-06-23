@@ -730,26 +730,17 @@ export default function SessionPage() {
 
   return (
     <>
-      <style>{`
-        @media (max-width: 760px) {
-          .smc-grid { grid-template-columns: 1fr !important; }
-          .smc-toprow { flex-direction: column; align-items: flex-start !important; }
-          .smc-controls { flex-wrap: wrap; }
-          .smc-followup { grid-template-columns: 1fr !important; }
-        }
-        * { box-sizing: border-box; }
-        .smc-flag-btn { opacity: 0.25; transition: opacity 0.15s; }
-        .smc-flag-btn:hover { opacity: 1 !important; }
-        .smc-flag-btn.flagged { opacity: 1 !important; }
-        .smc-drop-zone { border: 2px dashed #2a2f37; border-radius: 8px; padding: 20px 16px; text-align: center; cursor: pointer; transition: border-color 0.15s, background 0.15s; }
-        .smc-drop-zone.drag-over { border-color: #38bdf8; background: #0c1f33; }
-      `}</style>
       <div style={styles.root}>
 
         {/* Top bar */}
         <div className="smc-toprow" style={styles.topbar}>
           <div>
-            <div style={styles.brand}>Silent Meeting Copilot</div>
+            <div style={{
+              fontSize: 17, fontWeight: 700, letterSpacing: '-0.025em',
+              background: 'linear-gradient(135deg, var(--accent-hi) 0%, var(--others) 100%)',
+              WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+              backgroundClip: 'text',
+            }}>Silent Meeting Copilot</div>
             <div style={{ display: 'flex', gap: 12, marginTop: 2 }}>
               <a href="/meetings" style={styles.navLink}>&larr; Sessions</a>
               <a href="/profile" style={styles.navLink}>Profile</a>
@@ -809,7 +800,7 @@ export default function SessionPage() {
 
         {/* Preparation panel — visible when not live */}
         {showPrepPanel && (
-          <div style={styles.prepPanel}>
+          <div className="smc-prep-panel">
             <div style={styles.prepHeader}>
               <span style={styles.prepTitle}>Session preparation</span>
               {meetingId && <span style={{ fontSize: 11, color: '#6b7280' }}>ID: {meetingId.slice(0, 8)}…</span>}
@@ -957,8 +948,8 @@ export default function SessionPage() {
         {(isLive || status === 'stopped' || status === 'error') && (
           <div className="smc-grid" style={styles.grid}>
             {/* ME panel */}
-            <div style={{ ...styles.panel, borderColor: '#22c55e' }}>
-              <div style={{ ...styles.panelHead, color: '#22c55e' }}>ME — microphone</div>
+            <div className="smc-transcript-panel me-panel">
+              <div style={{ ...styles.panelHead, color: 'var(--me)' }}>ME — microphone</div>
               <div ref={meScrollRef} style={styles.transcript}>
                 {meLines.length === 0 && <span style={styles.muted}>Your speech will appear here…</span>}
                 {meLines.map((l, i) => (
@@ -988,8 +979,8 @@ export default function SessionPage() {
             </div>
 
             {/* OTHERS panel */}
-            <div style={{ ...styles.panel, borderColor: '#38bdf8' }}>
-              <div style={{ ...styles.panelHead, color: '#38bdf8' }}>
+            <div className="smc-transcript-panel others-panel">
+              <div style={{ ...styles.panelHead, color: 'var(--others)' }}>
                 OTHERS — system audio
                 {correctionCount > 0 && (
                   <span style={styles.correctionCountBadge}>{correctionCount} clarified</span>
@@ -1037,7 +1028,7 @@ export default function SessionPage() {
 
         {/* Coaching panel */}
         {(isLive || status === 'stopped') && (
-          <div style={styles.coachPanel}>
+          <div className="smc-coach-panel">
             <div style={styles.coachHeader}>
               <span style={styles.coachTitle}>Coaching</span>
               {coaching?.updatedAt && <span style={styles.coachTs}>Updated {coaching.updatedAt}</span>}
@@ -1104,7 +1095,7 @@ export default function SessionPage() {
 
         {/* Assist panel */}
         {(isLive || status === 'stopped') && (
-          <div style={styles.assistPanel}>
+          <div className="smc-assist-panel">
             <div style={styles.assistHeader}>
               <span style={styles.assistTitle}>Live Assist</span>
               <span style={styles.assistCount}>
@@ -1180,7 +1171,7 @@ export default function SessionPage() {
 
         {/* Follow-up Tracker */}
         {showFollowUp && (
-          <div style={styles.followUpSection}>
+          <div className="smc-followup-outer">
             <div style={styles.followUpHeader}>
               <span style={styles.followUpTitle}>Follow-up Tracker</span>
               <span style={styles.followUpCount}>
@@ -1292,132 +1283,125 @@ export default function SessionPage() {
 
 const styles = {
   root: {
-    minHeight: '100vh', background: '#0f1115', color: '#e6e8eb',
-    fontFamily: '"Segoe UI",system-ui,-apple-system,sans-serif',
+    minHeight: '100vh', background: 'var(--bg)', color: 'var(--tx)',
+    fontFamily: 'var(--font-sans)',
     display: 'flex', flexDirection: 'column', padding: 16, gap: 14,
     maxWidth: 1200, margin: '0 auto',
   },
   topbar: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  brand: { fontSize: 18, fontWeight: 600 },
-  navLink: { fontSize: 11, color: '#9aa0a6', textDecoration: 'none' },
+  brand: { fontSize: 17, fontWeight: 700 },
+  navLink: { fontSize: 11, color: 'var(--tx-3)', textDecoration: 'none', transition: 'color 0.12s' },
   codeBox: {
     display: 'flex', alignItems: 'center', gap: 8,
-    background: '#1a1d24', border: '1px solid #2a2f37', borderRadius: 8, padding: '6px 12px',
+    background: 'var(--bg-raised)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px',
   },
-  codeLabel: { fontSize: 11, color: '#9aa0a6', whiteSpace: 'nowrap' },
-  code: { fontSize: 17, fontWeight: 700, letterSpacing: '0.08em', color: '#2AB49F', fontFamily: 'monospace' },
-  smallBtn: { border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, color: '#fff', cursor: 'pointer', whiteSpace: 'nowrap' },
-  selectorLabel: { fontSize: 10, color: '#9aa0a6', letterSpacing: '0.04em', textTransform: 'uppercase' },
-  select: { background: '#1a1d24', border: '1px solid #2a2f37', color: '#e6e8eb', borderRadius: 6, padding: '6px 10px', fontSize: 12 },
+  codeLabel: { fontSize: 11, color: 'var(--tx-3)', whiteSpace: 'nowrap' },
+  code: { fontSize: 17, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--teal)', fontFamily: 'monospace', fontFeatureSettings: '"tnum"' },
+  smallBtn: { border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 600, color: '#fff', cursor: 'pointer', whiteSpace: 'nowrap', background: 'var(--bg-raised)' },
+  selectorLabel: { fontSize: 10, color: 'var(--tx-3)', letterSpacing: '0.04em', textTransform: 'uppercase' },
+  select: { background: 'var(--bg-raised)', border: '1px solid var(--border)', color: 'var(--tx)', borderRadius: 6, padding: '6px 10px', fontSize: 12, fontFamily: 'inherit' },
   dot: { width: 9, height: 9, borderRadius: '50%', display: 'inline-block', flexShrink: 0 },
-  statusText: { fontSize: 13, color: '#9aa0a6', whiteSpace: 'nowrap' },
-  btn: { border: 'none', borderRadius: 8, padding: '8px 18px', fontSize: 13, fontWeight: 600, color: '#fff', cursor: 'pointer' },
-  textInput: { background: '#1a1d24', border: '1px solid #2a2f37', color: '#e6e8eb', borderRadius: 8, padding: '8px 12px', fontSize: 13, width: '100%', outline: 'none' },
+  statusText: { fontSize: 13, color: 'var(--tx-2)', whiteSpace: 'nowrap' },
+  btn: { border: 'none', borderRadius: 8, padding: '8px 18px', fontSize: 13, fontWeight: 600, color: '#fff', cursor: 'pointer', fontFamily: 'inherit', minHeight: 38 },
+  textInput: { background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--tx)', borderRadius: 8, padding: '8px 12px', fontSize: 13, width: '100%', outline: 'none', fontFamily: 'inherit' },
   warnBox: { background: '#1c1007', border: '1px solid #92400e', borderRadius: 8, padding: '8px 12px', fontSize: 13, color: '#fcd34d' },
-  errorBox: { background: '#2d1010', border: '1px solid #7f1d1d', borderRadius: 8, padding: '8px 12px', fontSize: 13, color: '#fca5a5' },
-  // Preparation panel
-  prepPanel: { background: '#0d1421', border: '1px solid #1e3a5f', borderRadius: 12, overflow: 'hidden' },
+  errorBox: { background: 'var(--error-bg)', border: '1px solid rgba(244,63,94,0.30)', borderRadius: 8, padding: '8px 12px', fontSize: 13, color: '#fca5a5' },
+  // Preparation panel (outer div uses className="smc-prep-panel")
   prepHeader: {
     display: 'flex', alignItems: 'center', gap: 12,
-    padding: '10px 16px', borderBottom: '1px solid #1e3a5f',
+    padding: '10px 16px', borderBottom: '1px solid var(--others-border)',
   },
-  prepTitle: { fontSize: 13, fontWeight: 600, color: '#38bdf8' },
+  prepTitle: { fontSize: 13, fontWeight: 600, color: 'var(--others)' },
   prepBody: { display: 'flex', flexDirection: 'column', gap: 14, padding: 16 },
   fieldRow: { display: 'flex', flexDirection: 'column', gap: 4 },
-  uploadError: { background: '#2d1010', border: '1px solid #7f1d1d', borderRadius: 6, padding: '6px 10px', fontSize: 12, color: '#fca5a5', marginTop: 4 },
+  uploadError: { background: 'var(--error-bg)', border: '1px solid rgba(244,63,94,0.25)', borderRadius: 6, padding: '6px 10px', fontSize: 12, color: '#fca5a5', marginTop: 4 },
   docList: { display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 },
-  docItem: { display: 'flex', alignItems: 'center', gap: 8, background: '#111827', border: '1px solid #1f2937', borderRadius: 6, padding: '6px 10px' },
+  docItem: { display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px' },
   docIcon: { fontSize: 14, flexShrink: 0 },
-  docName: { fontSize: 12, color: '#e6e8eb', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  docSize: { fontSize: 10, color: '#6b7280', flexShrink: 0 },
-  docRemove: { background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: '0 2px', flexShrink: 0 },
-  // Transcript grid
+  docName: { fontSize: 12, color: 'var(--tx)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  docSize: { fontSize: 10, color: 'var(--tx-3)', flexShrink: 0 },
+  docRemove: { background: 'none', border: 'none', color: 'var(--tx-3)', cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: '0 2px', flexShrink: 0 },
+  // Transcript grid (panels use className="smc-transcript-panel me-panel/others-panel")
   grid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, flex: 1 },
-  panel: { background: '#171a21', border: '1px solid', borderRadius: 12, padding: 14, display: 'flex', flexDirection: 'column', minHeight: 300 },
+  panel: { background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: 12, padding: 14, display: 'flex', flexDirection: 'column', minHeight: 300 },
   panelHead: { fontSize: 13, fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 },
   correctionCountBadge: {
     fontSize: 9, fontWeight: 700, color: '#34d399', background: '#052e16',
     border: '1px solid #166534', borderRadius: 4, padding: '1px 6px', textTransform: 'uppercase', letterSpacing: '0.04em',
   },
   transcript: { flex: 1, overflowY: 'auto', fontSize: 14, lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: 6 },
-  muted: { color: '#9aa0a6', fontStyle: 'italic' },
+  muted: { color: 'var(--tx-2)', fontStyle: 'italic' },
   line: { display: 'flex', flexWrap: 'nowrap', gap: 6, alignItems: 'baseline' },
-  ts: { fontSize: 10, color: '#9aa0a6', flexShrink: 0 },
-  hint: { fontSize: 10, color: '#9aa0a6', cursor: 'help' },
+  ts: { fontSize: 10, color: 'var(--tx-3)', flexShrink: 0, fontFeatureSettings: '"tnum"' },
+  hint: { fontSize: 10, color: 'var(--tx-3)', cursor: 'help' },
   flagBtn: { background: 'none', border: 'none', fontSize: 14, padding: '0 2px', flexShrink: 0, lineHeight: 1 },
   clarifiedBadge: {
     fontSize: 9, fontWeight: 700, color: '#34d399', background: '#052e16',
     border: '1px solid #166534', borderRadius: 4, padding: '1px 5px', marginRight: 5,
     textTransform: 'uppercase', letterSpacing: '0.04em', verticalAlign: 'middle', display: 'inline-block',
   },
-  strikethrough: { fontSize: 11, color: '#6b7280', textDecoration: 'line-through', cursor: 'help', marginLeft: 4 },
-  // Coaching panel
-  coachPanel: { background: '#13111c', border: '1px solid #3b2f6e', borderRadius: 12 },
-  coachHeader: { display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderBottom: '1px solid #3b2f6e' },
-  coachTitle: { fontSize: 13, fontWeight: 600, color: '#a78bfa' },
-  coachTs: { fontSize: 11, color: '#6b7280' },
+  strikethrough: { fontSize: 11, color: 'var(--tx-3)', textDecoration: 'line-through', cursor: 'help', marginLeft: 4 },
+  // Coaching panel (outer div uses className="smc-coach-panel")
+  coachHeader: { display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderBottom: '1px solid var(--coach-border)', flexWrap: 'wrap' },
+  coachTitle: { fontSize: 13, fontWeight: 600, color: 'var(--coach)' },
+  coachTs: { fontSize: 11, color: 'var(--tx-3)' },
   coachBody: { display: 'flex', flexWrap: 'wrap', gap: 0 },
-  coachSection: { flex: '1 1 220px', padding: '12px 16px', borderRight: '1px solid #1f1a30', borderBottom: '1px solid #1f1a30' },
-  coachSectionLabel: { fontSize: 10, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 },
+  coachSection: { flex: '1 1 220px', padding: '12px 16px', borderRight: '1px solid rgba(255,255,255,0.05)', borderBottom: '1px solid rgba(255,255,255,0.05)' },
+  coachSectionLabel: { fontSize: 10, color: 'var(--tx-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 },
   balanceRow: { display: 'flex', alignItems: 'center', gap: 8 },
   balanceLabel: { fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', minWidth: 60 },
-  balanceBar: { flex: 1, height: 8, background: '#2a2f37', borderRadius: 4, overflow: 'hidden' },
-  balanceFill: { height: '100%', background: 'linear-gradient(to right, #22c55e, #38bdf8)', borderRadius: 4, transition: 'width 0.6s ease' },
-  coachList: { margin: 0, paddingLeft: 16, fontSize: 13, lineHeight: 1.6, color: '#d1d5db' },
+  balanceBar: { flex: 1, height: 8, background: 'var(--border)', borderRadius: 4, overflow: 'hidden' },
+  balanceFill: { height: '100%', background: 'linear-gradient(to right, var(--me), var(--others))', borderRadius: 4, transition: 'width 0.7s cubic-bezier(0.16,1,0.3,1)' },
+  coachList: { margin: 0, paddingLeft: 16, fontSize: 13, lineHeight: 1.6, color: 'var(--tx)' },
   coachItem: { marginBottom: 4 },
-  coachNone: { fontSize: 13, color: '#6b7280', fontStyle: 'italic' },
-  coachAlignment: { fontSize: 13, color: '#fbbf24', lineHeight: 1.5 },
-  // Assist panel
-  assistPanel: { background: '#0d1117', border: '1px solid #854d0e', borderRadius: 12 },
-  assistHeader: { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', borderBottom: '1px solid #292116', flexWrap: 'wrap' },
-  assistTitle: { fontSize: 13, fontWeight: 600, color: '#fbbf24' },
-  assistCount: { fontSize: 11, color: '#6b7280' },
-  clearBtn: { border: '1px solid #374151', borderRadius: 5, background: '#1f2937', color: '#9aa0a6', padding: '3px 9px', fontSize: 11, cursor: 'pointer' },
-  profileLink: { fontSize: 11, color: '#a78bfa', textDecoration: 'none', marginLeft: 'auto' },
+  coachNone: { fontSize: 13, color: 'var(--tx-3)', fontStyle: 'italic' },
+  coachAlignment: { fontSize: 13, color: 'var(--warn)', lineHeight: 1.5 },
+  // Assist panel (outer div uses className="smc-assist-panel")
+  assistHeader: { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', borderBottom: '1px solid var(--assist-border)', flexWrap: 'wrap' },
+  assistTitle: { fontSize: 13, fontWeight: 600, color: 'var(--assist)' },
+  assistCount: { fontSize: 11, color: 'var(--tx-3)' },
+  clearBtn: { border: '1px solid var(--border)', borderRadius: 5, background: 'var(--bg-raised)', color: 'var(--tx-2)', padding: '3px 9px', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' },
+  profileLink: { fontSize: 11, color: 'var(--accent)', textDecoration: 'none', marginLeft: 'auto' },
   assistGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12, padding: 14 },
   assistCard: { border: '1px solid', borderRadius: 10, padding: 12, display: 'flex', flexDirection: 'column', gap: 8 },
   assistCardTop: { display: 'flex', alignItems: 'center', gap: 8 },
   assistTypeBadge: { fontSize: 9, fontWeight: 700, borderRadius: 4, padding: '2px 6px', textTransform: 'uppercase', letterSpacing: '0.04em', flexShrink: 0 },
-  assistLabel: { fontSize: 12, fontWeight: 600, color: '#e6e8eb' },
-  assistValue: { fontSize: 13, color: '#d1d5db', wordBreak: 'break-all', background: '#161b22', borderRadius: 6, padding: '6px 10px', fontFamily: 'monospace' },
-  assistMissing: { fontSize: 12, color: '#9aa0a6', fontStyle: 'italic' },
-  copyBtn: { border: 'none', borderRadius: 6, padding: '5px 12px', fontSize: 11, fontWeight: 600, color: '#fff', cursor: 'pointer', alignSelf: 'flex-start' },
+  assistLabel: { fontSize: 12, fontWeight: 600, color: 'var(--tx)' },
+  assistValue: { fontSize: 13, color: 'var(--tx-2)', wordBreak: 'break-all', background: 'var(--bg-panel)', borderRadius: 6, padding: '6px 10px', fontFamily: 'monospace' },
+  assistMissing: { fontSize: 12, color: 'var(--tx-2)', fontStyle: 'italic' },
+  copyBtn: { border: 'none', borderRadius: 6, padding: '5px 12px', fontSize: 11, fontWeight: 600, color: '#fff', cursor: 'pointer', alignSelf: 'flex-start', background: 'var(--bg-raised)' },
   searchResults: { display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 },
-  searchResult: { background: '#0d1117', border: '1px solid #21262d', borderRadius: 6, padding: '8px 10px' },
-  searchResultTitle: { fontSize: 12, color: '#58a6ff', textDecoration: 'none', display: 'block', marginBottom: 2 },
-  searchResultSnippet: { fontSize: 11, color: '#8b949e', lineHeight: 1.4 },
-  // Follow-up tracker
-  followUpSection: { background: '#0b1017', border: '1px solid #1e3a2b', borderRadius: 12, overflow: 'hidden' },
+  searchResult: { background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: 6, padding: '8px 10px' },
+  searchResultTitle: { fontSize: 12, color: 'var(--others)', textDecoration: 'none', display: 'block', marginBottom: 2 },
+  searchResultSnippet: { fontSize: 11, color: 'var(--tx-2)', lineHeight: 1.4 },
+  // Follow-up tracker (outer div uses className="smc-followup-outer")
   followUpHeader: {
     display: 'flex', alignItems: 'center', gap: 10,
-    padding: '10px 16px', borderBottom: '1px solid #1e3a2b', flexWrap: 'wrap',
+    padding: '10px 16px', borderBottom: '1px solid var(--followup-border)', flexWrap: 'wrap',
   },
-  followUpTitle: { fontSize: 13, fontWeight: 600, color: '#4ade80' },
-  followUpCount: { fontSize: 11, color: '#6b7280' },
+  followUpTitle: { fontSize: 13, fontWeight: 600, color: 'var(--followup)' },
+  followUpCount: { fontSize: 11, color: 'var(--tx-3)' },
   followUpGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 },
-  followUpPanel: { border: '1px solid', borderRadius: 0, padding: 14, display: 'flex', flexDirection: 'column', gap: 8, background: '#0d1117' },
+  followUpPanel: { border: '1px solid var(--border)', borderRadius: 0, padding: 14, display: 'flex', flexDirection: 'column', gap: 8, background: 'var(--bg-panel)' },
   followUpPanelHead: { fontSize: 12, fontWeight: 600, marginBottom: 4, letterSpacing: '0.04em', textTransform: 'uppercase' },
-  tpItem: { display: 'flex', gap: 10, padding: '10px 12px', border: '1px solid', borderRadius: 8, background: '#111a14' },
+  tpItem: { display: 'flex', gap: 10, padding: '10px 12px', border: '1px solid', borderRadius: 8, background: 'var(--me-bg)' },
   refItem: { display: 'flex', gap: 10, padding: '10px 12px', minHeight: 60 },
   tpNumber: {
-    fontSize: 11, fontWeight: 700, color: '#4ade80', background: '#052e16',
-    border: '1px solid #166534', borderRadius: 4, padding: '1px 6px', height: 20,
+    fontSize: 11, fontWeight: 700, color: 'var(--followup)', background: 'rgba(74,222,128,0.10)',
+    border: '1px solid rgba(74,222,128,0.25)', borderRadius: 4, padding: '1px 6px', height: 20,
     flexShrink: 0, display: 'flex', alignItems: 'center',
   },
-  tpQuote: { fontSize: 13, color: '#d1d5db', lineHeight: 1.5, fontStyle: 'italic', marginBottom: 4 },
-  tpMeta: { fontSize: 10, color: '#6b7280', marginBottom: 6 },
-  tpWorking: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#9aa0a6', fontStyle: 'italic' },
-  workingDot: {
-    width: 7, height: 7, borderRadius: '50%', background: '#f59e0b',
-    display: 'inline-block',
-  },
-  tpAssist: { fontSize: 13, color: '#86efac', lineHeight: 1.6, whiteSpace: 'pre-wrap', marginBottom: 8 },
+  tpQuote: { fontSize: 13, color: 'var(--tx)', lineHeight: 1.5, fontStyle: 'italic', marginBottom: 4 },
+  tpMeta: { fontSize: 10, color: 'var(--tx-3)', marginBottom: 6 },
+  tpWorking: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--tx-2)', fontStyle: 'italic' },
+  workingDot: { width: 7, height: 7, borderRadius: '50%', background: 'var(--warn)', display: 'inline-block' },
+  tpAssist: { fontSize: 13, color: 'var(--me)', lineHeight: 1.6, whiteSpace: 'pre-wrap', marginBottom: 8 },
   addressBtn: {
-    border: '1px solid #1f2937', borderRadius: 5, background: '#1a2028',
-    color: '#6b7280', padding: '3px 8px', fontSize: 10, cursor: 'pointer',
+    border: '1px solid var(--border)', borderRadius: 5, background: 'var(--bg-raised)',
+    color: 'var(--tx-3)', padding: '3px 8px', fontSize: 10, cursor: 'pointer', fontFamily: 'inherit',
   },
-  refResult: { background: '#0d1117', border: '1px solid #1e3a5f', borderRadius: 6, padding: '8px 10px' },
-  refTitle: { fontSize: 12, color: '#60a5fa', textDecoration: 'none', display: 'block', marginBottom: 2, wordBreak: 'break-word' },
-  refSnippet: { fontSize: 11, color: '#6b7280', lineHeight: 1.4 },
-  foot: { fontSize: 11, color: '#9aa0a6', textAlign: 'center' },
+  refResult: { background: 'var(--others-bg)', border: '1px solid var(--others-border)', borderRadius: 6, padding: '8px 10px' },
+  refTitle: { fontSize: 12, color: 'var(--others)', textDecoration: 'none', display: 'block', marginBottom: 2, wordBreak: 'break-word' },
+  refSnippet: { fontSize: 11, color: 'var(--tx-3)', lineHeight: 1.4 },
+  foot: { fontSize: 11, color: 'var(--tx-3)', textAlign: 'center' },
 };

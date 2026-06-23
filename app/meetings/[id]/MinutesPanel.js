@@ -129,8 +129,8 @@ export default function MinutesPanel({ meetingId }) {
 
 const s = {
   wrapper: {
-    background: '#0d1117',
-    border: '1px solid #1e3a5f',
+    background: 'var(--others-bg)',
+    border: '1px solid var(--others-border)',
     borderRadius: 12,
     overflow: 'hidden',
   },
@@ -139,14 +139,14 @@ const s = {
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: '10px 16px',
-    borderBottom: '1px solid #1e3a5f',
+    borderBottom: '1px solid var(--others-border)',
     flexWrap: 'wrap',
     gap: 8,
   },
   label: {
     fontSize: 13,
     fontWeight: 600,
-    color: '#38bdf8',
+    color: 'var(--others)',
   },
   actions: {
     display: 'flex',
@@ -163,17 +163,19 @@ const s = {
     border: 'none',
     display: 'inline-block',
     lineHeight: 1.6,
+    fontFamily: 'inherit',
   },
   btnPrimary: {
-    background: '#1d4ed8',
+    background: 'var(--accent)',
     color: '#fff',
   },
   btnSecondary: {
-    background: '#1f2937',
-    color: '#d1d5db',
+    background: 'var(--bg-raised)',
+    color: 'var(--tx-2)',
+    border: '1px solid var(--border)',
   },
   error: {
-    color: '#f87171',
+    color: 'var(--error)',
     fontSize: 12,
     padding: '8px 16px',
   },
@@ -185,31 +187,32 @@ const s = {
   },
   emptyMsg: {
     fontSize: 13,
-    color: '#6b7280',
+    color: 'var(--tx-3)',
     fontStyle: 'italic',
   },
   previewTitle: {
     fontSize: 16,
     fontWeight: 700,
-    color: '#e6e8eb',
+    color: 'var(--tx)',
+    letterSpacing: '-0.01em',
   },
   previewDate: {
     fontWeight: 400,
     fontSize: 13,
-    color: '#6b7280',
+    color: 'var(--tx-3)',
   },
   row: {
     fontSize: 13,
-    color: '#9aa0a6',
+    color: 'var(--tx-2)',
   },
   rowLabel: {
     fontWeight: 600,
-    color: '#d1d5db',
+    color: 'var(--tx)',
     marginRight: 6,
   },
   rowVal: {},
   section: {
-    borderTop: '1px solid #1f2937',
+    borderTop: '1px solid var(--border)',
     paddingTop: 10,
   },
   sectionHead: {
@@ -217,19 +220,19 @@ const s = {
     fontWeight: 600,
     textTransform: 'uppercase',
     letterSpacing: '0.06em',
-    color: '#38bdf8',
+    color: 'var(--others)',
     marginBottom: 6,
   },
   bodyText: {
     fontSize: 13,
-    color: '#d1d5db',
+    color: 'var(--tx)',
     lineHeight: 1.6,
   },
   list: {
     margin: 0,
     paddingLeft: 18,
     fontSize: 13,
-    color: '#d1d5db',
+    color: 'var(--tx)',
     lineHeight: 1.7,
   },
   table: {
@@ -239,14 +242,14 @@ const s = {
   },
   th: {
     textAlign: 'left',
-    color: '#9aa0a6',
+    color: 'var(--tx-2)',
     fontWeight: 600,
     fontSize: 11,
     padding: '4px 8px',
-    borderBottom: '1px solid #374151',
+    borderBottom: '1px solid var(--border)',
   },
   td: {
-    color: '#d1d5db',
+    color: 'var(--tx)',
     padding: '5px 8px',
     verticalAlign: 'top',
   },

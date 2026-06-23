@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import ThemeToggle from '../components/ThemeToggle';
 
 export default function Verify() {
   const [status, setStatus] = useState('ready');
@@ -24,18 +25,27 @@ export default function Verify() {
   }
 
   return (
-    <main style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
-      <div style={{ width: '100%', maxWidth: '400px', background: '#fff', borderRadius: '14px', padding: '28px', boxShadow: '0 16px 40px rgba(10,25,41,0.14)' }}>
-        <h1 style={{ fontFamily: 'Georgia,serif', fontSize: '20px', margin: '0 0 6px', color: '#0f2236' }}>Silent Meeting Copilot</h1>
+    <main className="aurora-bg auth-root">
+      <ThemeToggle className="auth-theme-btn" />
+      <div className="auth-card glass-raised">
+        <h1 className="auth-wordmark">Silent Meeting Copilot</h1>
+        <p className="auth-tagline">Confirm your identity to continue</p>
+
         {status === 'error' ? (
           <div>
-            <p style={{ color: '#c0392b', fontSize: '14px', margin: '0 0 12px' }}>This sign-in link is invalid or has expired.</p>
-            <a href="/login" style={{ color: '#2AB49F', fontSize: '14px', fontWeight: 600 }}>Request a new link</a>
+            <p className="auth-error-msg">This sign-in link is invalid or has expired.</p>
+            <a href="/login" className="auth-link">Request a new link →</a>
           </div>
         ) : (
           <div>
-            <p style={{ color: '#5a6b7c', fontSize: '14px', margin: '0 0 16px' }}>Confirm it is you to continue signing in.</p>
-            <button onClick={go} disabled={status === 'working' || !token} style={{ width: '100%', minHeight: '44px', background: '#2AB49F', color: '#062b27', border: 'none', borderRadius: '10px', fontWeight: 600, fontSize: '15px', cursor: 'pointer' }}>{status === 'working' ? 'Verifying...' : 'Continue sign in'}</button>
+            <p className="auth-prompt">Confirm it is you to continue signing in.</p>
+            <button
+              onClick={go}
+              disabled={status === 'working' || !token}
+              className="auth-btn"
+            >
+              {status === 'working' ? 'Verifying…' : 'Continue sign in'}
+            </button>
           </div>
         )}
       </div>

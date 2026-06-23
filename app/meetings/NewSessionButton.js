@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-export default function NewSessionButton({ style }) {
+export default function NewSessionButton({ className, style }) {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
@@ -24,7 +24,12 @@ export default function NewSessionButton({ style }) {
   }
 
   return (
-    <button onClick={handleClick} disabled={loading} style={style}>
+    <button
+      onClick={handleClick}
+      disabled={loading}
+      className={className || 'btn-new-session'}
+      style={style}
+    >
       {loading ? 'Creating…' : '+ New Session'}
     </button>
   );

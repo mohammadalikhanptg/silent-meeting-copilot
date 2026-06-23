@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import ThemeToggle from '../components/ThemeToggle';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -18,16 +19,34 @@ export default function Login() {
   }
 
   return (
-    <main style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
-      <div style={{ width: '100%', maxWidth: '400px', background: '#fff', borderRadius: '14px', padding: '28px', boxShadow: '0 16px 40px rgba(10,25,41,0.14)' }}>
-        <h1 style={{ fontFamily: 'Georgia,serif', fontSize: '22px', margin: '0 0 6px', color: '#0f2236' }}>Silent Meeting Copilot</h1>
+    <main className="aurora-bg auth-root">
+      <ThemeToggle className="auth-theme-btn" />
+      <div className="auth-card glass-raised">
+        <h1 className="auth-wordmark">Silent Meeting Copilot</h1>
+        <p className="auth-tagline">Live coaching · Transcription · Follow-up</p>
+
         {sent ? (
-          <p style={{ color: '#5a6b7c', fontSize: '14px' }}>If that address is allowed, a sign-in link is on its way. It expires in 15 minutes.</p>
+          <div className="auth-success">
+            <span className="auth-success-icon">✓</span>
+            <span className="auth-success-text">
+              If that address is allowed, a sign-in link is on its way. It expires in 15 minutes.
+            </span>
+          </div>
         ) : (
           <form onSubmit={submit}>
-            <p style={{ color: '#5a6b7c', fontSize: '14px', margin: '0 0 16px' }}>Enter your email to receive a sign-in link.</p>
-            <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" style={{ width: '100%', padding: '12px', borderRadius: '10px', border: '1px solid #c4ccd4', fontSize: '15px', marginBottom: '12px', boxSizing: 'border-box' }} />
-            <button type="submit" disabled={loading} style={{ width: '100%', minHeight: '44px', background: '#2AB49F', color: '#062b27', border: 'none', borderRadius: '10px', fontWeight: 600, fontSize: '15px', cursor: 'pointer' }}>{loading ? 'Sending...' : 'Send sign-in link'}</button>
+            <p className="auth-prompt">Enter your email to receive a sign-in link.</p>
+            <input
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              className="auth-input"
+              autoFocus
+            />
+            <button type="submit" disabled={loading} className="auth-btn">
+              {loading ? 'Sending…' : 'Send sign-in link'}
+            </button>
           </form>
         )}
       </div>

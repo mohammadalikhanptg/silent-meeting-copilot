@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { getSessionPayload } from '../lib/auth';
 import { getSql } from '../lib/db';
 import NewSessionButton from './NewSessionButton';
+import ThemeToggle from '../components/ThemeToggle';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,21 +27,9 @@ function deriveStatus(m) {
   return 'prepared';
 }
 
-const STATUS_LABEL = {
-  completed: 'Completed',
-  'in-progress': 'In progress',
-  prepared: 'Prepared',
-};
-const STATUS_COLOR = {
-  completed: '#22c55e',
-  'in-progress': '#facc15',
-  prepared: '#38bdf8',
-};
-const STATUS_BG = {
-  completed: '#052e16',
-  'in-progress': '#1c1a07',
-  prepared: '#0c1f33',
-};
+const STATUS_LABEL = { completed: 'Completed', 'in-progress': 'In progress', prepared: 'Prepared' };
+const STATUS_COLOR = { completed: '#22c55e', 'in-progress': '#facc15', prepared: '#38bdf8' };
+const STATUS_BG = { completed: '#052e16', 'in-progress': '#1c1a07', prepared: '#0c1f33' };
 
 export default async function SessionsPage() {
   const session = await getSessionPayload();
@@ -58,71 +47,71 @@ export default async function SessionsPage() {
     LIMIT 50
   `;
 
-  const btnStyle = {
-    background: '#2AB49F',
-    color: '#fff',
-    border: 'none',
-    padding: '10px 20px',
-    borderRadius: 8,
-    fontSize: 14,
-    fontWeight: 700,
-    cursor: 'pointer',
-    letterSpacing: '0.02em',
-  };
-
   return (
-    <main style={styles.root}>
-      <div style={styles.header}>
+    <main className="sessions-root">
+      {/* Header */}
+      <div className="sessions-header">
         <div>
-          <h1 style={styles.title}>Sessions</h1>
-          <p style={styles.sub}>Signed in as {session.email}</p>
+          <h1 className="sessions-title">Sessions</h1>
+          <p className="sessions-sub">Signed in as {session.email}</p>
         </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <a href="/profile" style={styles.navLink}>Profile</a>
-          {session.role === 'admin' && <a href="/admin" style={styles.navLink}>Admin</a>}
-          <NewSessionButton style={btnStyle} />
+        <div className="sessions-nav">
+          <a href="/profile" className="sessions-nav-link">Profile</a>
+          {session.role === 'admin' && <a href="/admin" className="sessions-nav-link">Admin</a>}
+          <NewSessionButton />
+          <ThemeToggle />
         </div>
       </div>
 
       {meetings.length === 0 ? (
-        <div style={styles.empty}>
-          <div style={styles.emptyIcon}>🎙</div>
-          <div style={styles.emptyTitle}>No sessions yet</div>
-          <div style={styles.emptySub}>
+        <div className="sessions-empty">
+          <div className="sessions-empty-icon">🎙</div>
+          <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--tx)' }}>No sessions yet</div>
+          <div style={{ fontSize: 14, color: 'var(--tx-3)', maxWidth: 360, lineHeight: 1.6 }}>
             Create your first session to start real-time coaching, transcription, and follow-up tracking.
           </div>
-          <NewSessionButton style={{ ...btnStyle, marginTop: 16 }} />
+          <NewSessionButton style={{ marginTop: 8 }} />
         </div>
       ) : (
-        <div style={styles.list}>
+        <div className="sessions-list">
           {meetings.map(m => {
             const status = deriveStatus(m);
             const href = status === 'completed' ? `/meetings/${m.id}` : `/session?m=${m.id}`;
             const duration = formatDuration(m.started_at, m.ended_at);
             return (
-              <a key={m.id} href={href} style={styles.card}>
-                <div style={styles.cardTop}>
-                  <span style={styles.cardTitle}>{m.title || 'Untitled session'}</span>
+              <a key={m.id} href={href} className="session-card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--tx)' }}>
+                    {m.title || 'Untitled session'}
+                  </span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span style={{
-                      ...styles.statusBadge,
+                      fontSize: 10, padding: '2px 9px', borderRadius: 'var(--r-full)',
+                      fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em',
+                      whiteSpace: 'nowrap',
                       color: STATUS_COLOR[status],
                       background: STATUS_BG[status],
                       border: `1px solid ${STATUS_COLOR[status]}33`,
                     }}>
                       {STATUS_LABEL[status]}
                     </span>
-                    <span style={styles.cardMeta}>{formatDate(m.started_at)}</span>
+                    <span style={{ fontSize: 11, color: 'var(--tx-3)', whiteSpace: 'nowrap' }}>{formatDate(m.started_at)}</span>
                   </div>
                 </div>
                 {m.objective && (
-                  <div style={styles.cardObjective}>{m.objective}</div>
+                  <div style={{ fontSize: 13, color: 'var(--tx-2)', fontStyle: 'italic', marginBottom: 8 }}>{m.objective}</div>
                 )}
-                <div style={styles.cardFooter}>
-                  <span style={styles.pill}>{m.language_mode || 'english'}</span>
-                  <span style={styles.cardStat}>{m.segment_count} segments</span>
-                  {duration && <span style={styles.cardStat}>{duration}</span>}
-                  <span style={{ ...styles.cardStat, marginLeft: 'auto', color: '#38bdf8' }}>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
+                  <span style={{
+                    fontSize: 10, padding: '2px 9px', borderRadius: 'var(--r-full)',
+                    background: 'var(--others-bg)', color: 'var(--others)',
+                    fontWeight: 600, textTransform: 'uppercase',
+                  }}>
+                    {m.language_mode || 'english'}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--tx-3)' }}>{m.segment_count} segments</span>
+                  {duration && <span style={{ fontSize: 11, color: 'var(--tx-3)' }}>{duration}</span>}
+                  <span style={{ fontSize: 11, color: 'var(--accent)', marginLeft: 'auto' }}>
                     {status === 'completed' ? 'View review →' : 'Open →'}
                   </span>
                 </div>
@@ -134,95 +123,3 @@ export default async function SessionsPage() {
     </main>
   );
 }
-
-const styles = {
-  root: {
-    minHeight: '100vh',
-    background: '#0f1115',
-    color: '#e6e8eb',
-    fontFamily: '"Segoe UI",system-ui,-apple-system,sans-serif',
-    padding: '32px 24px',
-    maxWidth: 860,
-    margin: '0 auto',
-  },
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 28,
-    gap: 12,
-    flexWrap: 'wrap',
-  },
-  title: { margin: 0, fontSize: 24, fontWeight: 700 },
-  sub: { margin: '4px 0 0', fontSize: 12, color: '#6b7280' },
-  navLink: { fontSize: 13, color: '#a78bfa', textDecoration: 'none', alignSelf: 'center' },
-  empty: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 320,
-    textAlign: 'center',
-    gap: 8,
-  },
-  emptyIcon: { fontSize: 48, marginBottom: 8 },
-  emptyTitle: { fontSize: 18, fontWeight: 600, color: '#e6e8eb' },
-  emptySub: { fontSize: 14, color: '#6b7280', maxWidth: 360, lineHeight: 1.6 },
-  list: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 10,
-  },
-  card: {
-    display: 'block',
-    background: '#171a21',
-    border: '1px solid #2a2f37',
-    borderRadius: 10,
-    padding: '14px 16px',
-    textDecoration: 'none',
-    color: 'inherit',
-    transition: 'border-color 0.15s',
-  },
-  cardTop: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'baseline',
-    gap: 8,
-    marginBottom: 4,
-    flexWrap: 'wrap',
-  },
-  cardTitle: { fontSize: 15, fontWeight: 600, color: '#e6e8eb' },
-  cardMeta: { fontSize: 11, color: '#6b7280', whiteSpace: 'nowrap' },
-  cardObjective: {
-    fontSize: 13,
-    color: '#9aa0a6',
-    fontStyle: 'italic',
-    marginBottom: 8,
-  },
-  cardFooter: {
-    display: 'flex',
-    gap: 10,
-    alignItems: 'center',
-    marginTop: 6,
-    flexWrap: 'wrap',
-  },
-  statusBadge: {
-    fontSize: 10,
-    padding: '2px 8px',
-    borderRadius: 99,
-    fontWeight: 700,
-    textTransform: 'uppercase',
-    letterSpacing: '0.04em',
-    whiteSpace: 'nowrap',
-  },
-  pill: {
-    fontSize: 10,
-    padding: '2px 8px',
-    borderRadius: 99,
-    background: '#1e293b',
-    color: '#38bdf8',
-    fontWeight: 600,
-    textTransform: 'uppercase',
-  },
-  cardStat: { fontSize: 11, color: '#6b7280' },
-};

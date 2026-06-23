@@ -204,14 +204,18 @@ export default function ProfilePage() {
   return (
     <>
       <style>{`
-        * { box-sizing: border-box; }
         @media (max-width: 600px) { .pf-row { flex-direction: column !important; } }
-        .pf-dropzone:focus { outline: 2px solid #38bdf8; }
+        .pf-dropzone:focus { outline: 2px solid var(--others); }
+        .smc-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
       `}</style>
       <div style={styles.root}>
         <div style={styles.header}>
           <div>
-            <div style={styles.brand}>Silent Meeting Copilot</div>
+            <div style={{
+              fontSize: 17, fontWeight: 700, letterSpacing: '-0.025em',
+              background: 'linear-gradient(135deg, var(--accent-hi) 0%, var(--others) 100%)',
+              WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
+            }}>Silent Meeting Copilot</div>
             <div style={{ display: 'flex', gap: 12, marginTop: 2 }}>
               <a href="/" style={styles.navLink}>&larr; Home</a>
               <a href="/session" style={styles.navLink}>Live session</a>
@@ -513,9 +517,9 @@ export default function ProfilePage() {
 const styles = {
   root: {
     minHeight: '100vh',
-    background: '#0f1115',
-    color: '#e6e8eb',
-    fontFamily: '"Segoe UI",system-ui,-apple-system,sans-serif',
+    background: 'var(--bg)',
+    color: 'var(--tx)',
+    fontFamily: 'var(--font-sans)',
     maxWidth: 800,
     margin: '0 auto',
     padding: 24,
@@ -524,35 +528,35 @@ const styles = {
     gap: 20,
   },
   header: { display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 },
-  brand: { fontSize: 18, fontWeight: 600 },
-  navLink: { fontSize: 11, color: '#9aa0a6', textDecoration: 'none' },
+  brand: { fontSize: 17, fontWeight: 700 },
+  navLink: { fontSize: 11, color: 'var(--tx-3)', textDecoration: 'none' },
   headerRight: { flex: 1, minWidth: 280 },
-  title: { fontSize: 22, fontWeight: 700, margin: '0 0 4px' },
-  subtitle: { fontSize: 13, color: '#9aa0a6', margin: 0, lineHeight: 1.5 },
+  title: { fontSize: 22, fontWeight: 700, margin: '0 0 4px', letterSpacing: '-0.02em' },
+  subtitle: { fontSize: 13, color: 'var(--tx-2)', margin: 0, lineHeight: 1.5 },
   errorBox: {
-    background: '#2d1010', border: '1px solid #7f1d1d',
-    borderRadius: 8, padding: '8px 12px', fontSize: 13, color: '#fca5a5',
+    background: 'var(--error-bg)', border: '1px solid rgba(244,63,94,0.25)',
+    borderRadius: 8, padding: '8px 12px', fontSize: 13, color: 'var(--error)',
   },
   infoBox: {
-    background: '#0c1f33', border: '1px solid #1e3a5f',
-    borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#93c5fd', lineHeight: 1.5,
+    background: 'var(--others-bg)', border: '1px solid var(--others-border)',
+    borderRadius: 8, padding: '10px 14px', fontSize: 13, color: 'var(--others)', lineHeight: 1.5,
   },
   guideBox: {
-    background: '#071525', border: '1px solid #1e3a5f',
+    background: 'var(--surf-0)', border: '1px solid var(--others-border)',
     borderRadius: 10, padding: 14,
   },
   guidePre: {
-    background: '#0a1a2a', border: '1px solid #1e3a5f',
+    background: 'var(--bg-panel)', border: '1px solid var(--border)',
     borderRadius: 8, padding: '12px 14px',
-    fontSize: 12, color: '#cbd5e1', lineHeight: 1.6,
-    fontFamily: '"Fira Mono","Consolas","Courier New",monospace',
+    fontSize: 12, color: 'var(--tx-2)', lineHeight: 1.6,
+    fontFamily: 'monospace',
     whiteSpace: 'pre-wrap', wordBreak: 'break-word',
     margin: '0 0 10px',
   },
   copyBtn: {
     border: '1px solid', borderRadius: 6,
     padding: '5px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-    transition: 'background 0.15s',
+    transition: 'background 0.15s', fontFamily: 'inherit',
   },
   dropZone: {
     border: '2px dashed', borderRadius: 10,
@@ -562,35 +566,38 @@ const styles = {
   },
   docRow: {
     display: 'flex', alignItems: 'center', gap: 8,
-    background: '#0a1a2a', border: '1px solid #1e3a5f',
+    background: 'var(--bg-panel)', border: '1px solid var(--border)',
     borderRadius: 6, padding: '5px 10px',
   },
-  form: { display: 'flex', flexDirection: 'column', gap: 24 },
+  form: { display: 'flex', flexDirection: 'column', gap: 16 },
   section: {
-    background: '#171a21', border: '1px solid #2a2f37',
+    background: 'var(--surf-1)', border: '1px solid var(--border)',
+    borderTopColor: 'var(--border-hi)',
     borderRadius: 12, padding: 16, display: 'flex', flexDirection: 'column', gap: 10,
+    boxShadow: 'var(--shadow-sm)',
   },
   sectionHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  sectionTitle: { fontSize: 14, fontWeight: 600, color: '#e6e8eb' },
-  sectionHint: { fontSize: 12, color: '#6b7280', margin: 0 },
+  sectionTitle: { fontSize: 11, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.06em' },
+  sectionHint: { fontSize: 12, color: 'var(--tx-3)', margin: 0 },
   addBtn: {
-    border: '1px solid #2a2f37', borderRadius: 6, background: '#1a1d24',
-    color: '#9aa0a6', padding: '4px 10px', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap',
+    border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg-raised)',
+    color: 'var(--tx-2)', padding: '4px 10px', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit',
   },
   removeBtn: {
-    border: 'none', borderRadius: 6, background: '#2d1010',
-    color: '#f87171', padding: '4px 8px', fontSize: 12, cursor: 'pointer', flexShrink: 0,
+    border: 'none', borderRadius: 6, background: 'var(--error-bg)',
+    color: 'var(--error)', padding: '4px 8px', fontSize: 12, cursor: 'pointer', flexShrink: 0, fontFamily: 'inherit',
   },
   fieldRow: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' },
-  label: { fontSize: 12, color: '#9aa0a6', minWidth: 120, flexShrink: 0 },
+  label: { fontSize: 12, color: 'var(--tx-2)', minWidth: 120, flexShrink: 0 },
   input: {
-    background: '#1a1d24', border: '1px solid #2a2f37', color: '#e6e8eb',
+    background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--tx)',
     borderRadius: 6, padding: '7px 10px', fontSize: 13, flex: 1, minWidth: 0, outline: 'none',
     fontFamily: 'inherit',
+    transition: 'border-color 0.12s',
   },
-  empty: { fontSize: 12, color: '#6b7280', fontStyle: 'italic' },
+  empty: { fontSize: 12, color: 'var(--tx-3)', fontStyle: 'italic' },
   saveBtn: {
     border: 'none', borderRadius: 8, padding: '9px 24px',
-    fontSize: 14, fontWeight: 600, color: '#fff', cursor: 'pointer',
+    fontSize: 14, fontWeight: 600, color: '#fff', cursor: 'pointer', fontFamily: 'inherit',
   },
 };
