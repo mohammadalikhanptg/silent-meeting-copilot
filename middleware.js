@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-const PUBLIC = ['/login', '/verify', '/totp', '/api/auth/'];
+const PUBLIC = ['/login', '/verify', '/totp', '/api/auth/', '/api/internal/'];
 
 function b64urlToBytes(s) {
   s = s.replace(/-/g, '+').replace(/_/g, '/');
