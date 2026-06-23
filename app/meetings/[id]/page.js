@@ -41,15 +41,20 @@ export default async function MeetingDetailPage({ params }) {
   if (!meeting) notFound();
 
   const segments = await sql`
-    SELECT speaker, raw, cleaned, lang, ts
+    SELECT speaker, raw, cleaned, corrected_text, clarified_by_me, lang, ts
     FROM transcript_segments
     WHERE meeting_id = ${id}
     ORDER BY ts
   `;
 
+  // Coaching uses corrected OTHERS text where available
   const me = segments.filter(s => s.speaker === 'me').map(s => s.cleaned);
-  const others = segments.filter(s => s.speaker === 'others').map(s => s.cleaned);
+  const others = segments
+    .filter(s => s.speaker === 'others')
+    .map(s => s.corrected_text || s.cleaned);
   const coaching = await fetchCoaching(me, others, meeting.objective);
+
+  const clarifiedCount = segments.filter(s => s.clarified_by_me).length;
 
   return (
     <main style={styles.root}>
@@ -65,6 +70,14 @@ export default async function MeetingDetailPage({ params }) {
             <span style={{ textTransform: 'uppercase', fontSize: 10, color: '#38bdf8' }}>
               {meeting.language_mode || 'english'}
             </span>
+            {clarifiedCount > 0 && (
+              <>
+                &nbsp;&middot;&nbsp;
+                <span style={{ fontSize: 10, color: '#34d399' }}>
+                  {clarifiedCount} turn{clarifiedCount !== 1 ? 's' : ''} clarified
+                </span>
+              </>
+            )}
           </div>
           {meeting.objective && (
             <div style={styles.objective}>Objective: {meeting.objective}</div>
@@ -97,6 +110,17 @@ export default async function MeetingDetailPage({ params }) {
                 </span>
               </div>
             </div>
+
+            {/* Repairs note */}
+            {clarifiedCount > 0 && (
+              <div style={styles.coachCell}>
+                <div style={styles.coachLabel}>Transcript repairs</div>
+                <div style={{ fontSize: 12, color: '#34d399', lineHeight: 1.5 }}>
+                  {clarifiedCount} OTHERS turn{clarifiedCount !== 1 ? 's' : ''} were auto-corrected from your restatements.
+                  Coaching reflects the corrected meanings.
+                </div>
+              </div>
+            )}
 
             {/* Open items */}
             {coaching.openItems?.length > 0 && (
@@ -137,12 +161,44 @@ export default async function MeetingDetailPage({ params }) {
         ) : (
           <div style={styles.transcriptList}>
             {segments.map((seg, i) => (
-              <div key={i} style={{ ...styles.segRow, borderColor: seg.speaker === 'me' ? '#166534' : '#0c4a6e' }}>
-                <span style={{ ...styles.speakerTag, color: seg.speaker === 'me' ? '#22c55e' : '#38bdf8' }}>
+              <div
+                key={i}
+                style={{
+                  ...styles.segRow,
+                  borderColor: seg.speaker === 'me' ? '#166534' : '#0c4a6e',
+                }}
+              >
+                <span style={{
+                  ...styles.speakerTag,
+                  color: seg.speaker === 'me' ? '#22c55e' : '#38bdf8',
+                }}>
                   {seg.speaker === 'me' ? 'ME' : 'OTHERS'}
                 </span>
                 <span style={styles.segTs}>{new Date(seg.ts).toLocaleTimeString()}</span>
-                <span style={styles.segText}>{seg.cleaned}</span>
+                <div style={{ flex: 1 }}>
+                  {seg.clarified_by_me && seg.corrected_text ? (
+                    <>
+                      <span style={styles.clarifiedBadge}>clarified</span>
+                      <span style={{ ...styles.segText, color: '#86efac' }}>
+                        {seg.corrected_text}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          color: '#6b7280',
+                          textDecoration: 'line-through',
+                          marginLeft: 8,
+                          cursor: 'help',
+                        }}
+                        title="Original transcription"
+                      >
+                        {seg.cleaned}
+                      </span>
+                    </>
+                  ) : (
+                    <span style={styles.segText}>{seg.cleaned}</span>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -224,5 +280,19 @@ const styles = {
   },
   speakerTag: { fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', minWidth: 46, flexShrink: 0 },
   segTs: { fontSize: 10, color: '#6b7280', flexShrink: 0 },
-  segText: { fontSize: 13, lineHeight: 1.5, flex: 1 },
+  segText: { fontSize: 13, lineHeight: 1.5 },
+  clarifiedBadge: {
+    fontSize: 9,
+    fontWeight: 700,
+    color: '#34d399',
+    background: '#052e16',
+    border: '1px solid #166534',
+    borderRadius: 4,
+    padding: '1px 5px',
+    marginRight: 6,
+    textTransform: 'uppercase',
+    letterSpacing: '0.04em',
+    verticalAlign: 'middle',
+    display: 'inline-block',
+  },
 };

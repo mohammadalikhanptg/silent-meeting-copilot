@@ -17,6 +17,9 @@ try {
   await sql`CREATE INDEX IF NOT EXISTS idx_meetings_user ON meetings (user_email, started_at DESC)`;
   await sql`CREATE TABLE IF NOT EXISTS transcript_segments (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), meeting_id uuid NOT NULL REFERENCES meetings(id), speaker text NOT NULL CHECK (speaker IN ('me','others')), raw text NOT NULL, cleaned text NOT NULL, lang text, ts timestamptz NOT NULL DEFAULT now())`;
   await sql`CREATE INDEX IF NOT EXISTS idx_segments_meeting ON transcript_segments (meeting_id, ts)`;
+  // P1/P2: repeat-back repair columns (idempotent — ADD COLUMN IF NOT EXISTS)
+  await sql`ALTER TABLE transcript_segments ADD COLUMN IF NOT EXISTS corrected_text text`;
+  await sql`ALTER TABLE transcript_segments ADD COLUMN IF NOT EXISTS clarified_by_me boolean DEFAULT false`;
   console.log('[migrate] ok');
 } catch (e) {
   console.error('[migrate] failed:', e.message);

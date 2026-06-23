@@ -114,7 +114,34 @@ export default function SessionPage() {
           body: JSON.stringify({ me, others, objective: objectiveRef.current }),
         });
         const data = await res.json();
-        if (data.ok) setCoaching({ ...data, updatedAt: new Date().toLocaleTimeString() });
+        if (data.ok) {
+          // Apply any repeat-back corrections to othersLines
+          if (data.corrections && data.corrections.length > 0) {
+            setOthersLines(prev => {
+              const updated = [...prev];
+              for (const c of data.corrections) {
+                if (c.othersIndex >= 0 && c.othersIndex < updated.length) {
+                  const existing = updated[c.othersIndex];
+                  // Only apply if not already corrected
+                  if (!existing.clarifiedByMe) {
+                    updated[c.othersIndex] = { ...existing, corrected: c.corrected, clarifiedByMe: true };
+                    // Persist correction to DB if we have the segment ID
+                    const segId = existing.segmentId;
+                    if (segId && meetingIdRef.current) {
+                      fetch(`/api/meetings/${meetingIdRef.current}/segments/${segId}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ corrected_text: c.corrected, clarified_by_me: true }),
+                      }).catch(() => {});
+                    }
+                  }
+                }
+              }
+              return updated;
+            });
+          }
+          setCoaching({ ...data, updatedAt: new Date().toLocaleTimeString() });
+        }
       } catch (_) {}
     };
 
@@ -197,25 +224,60 @@ export default function SessionPage() {
             try {
               const msg = JSON.parse(evt.data);
               if (msg.type === 'transcript' && msg.raw) {
-                const line = { raw: msg.raw, cleaned: msg.cleaned || msg.raw, ts: new Date().toLocaleTimeString() };
                 if (msg.speaker === 'others') {
+                  // Build line object — segmentId will be filled in async after DB save
+                  const line = {
+                    raw: msg.raw,
+                    cleaned: msg.cleaned || msg.raw,
+                    ts: new Date().toLocaleTimeString(),
+                    segmentId: null,
+                    corrected: null,
+                    clarifiedByMe: false,
+                  };
                   setOthersLines(p => [...p.slice(-200), line]);
+
+                  // Persist segment to DB and capture ID for later correction updates
+                  if (meetingIdRef.current) {
+                    const mId = meetingIdRef.current;
+                    fetch(`/api/meetings/${mId}/segments`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        speaker: 'others',
+                        raw: msg.raw,
+                        cleaned: line.cleaned,
+                        lang: MODE_LANG[sessionMode] || null,
+                      }),
+                    })
+                      .then(r => r.json())
+                      .then(d => {
+                        if (d.segmentId) {
+                          // Find the line by object identity and store its DB ID
+                          setOthersLines(prev =>
+                            prev.map(l => l === line ? { ...l, segmentId: d.segmentId } : l)
+                          );
+                        }
+                      })
+                      .catch(() => {});
+                  }
                 } else {
+                  // ME lines — no ID tracking needed (corrections don't apply to ME)
+                  const line = { raw: msg.raw, cleaned: msg.cleaned || msg.raw, ts: new Date().toLocaleTimeString() };
                   setMeLines(p => [...p.slice(-200), line]);
-                }
-                // Persist segment to DB (fire-and-forget)
-                if (meetingIdRef.current) {
-                  const mId = meetingIdRef.current;
-                  fetch(`/api/meetings/${mId}/segments`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      speaker: msg.speaker,
-                      raw: msg.raw,
-                      cleaned: msg.cleaned || msg.raw,
-                      lang: MODE_LANG[sessionMode] || null,
-                    }),
-                  }).catch(() => {});
+                  // Persist ME segment (fire-and-forget)
+                  if (meetingIdRef.current) {
+                    const mId = meetingIdRef.current;
+                    fetch(`/api/meetings/${mId}/segments`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        speaker: 'me',
+                        raw: msg.raw,
+                        cleaned: msg.cleaned || msg.raw,
+                        lang: MODE_LANG[sessionMode] || null,
+                      }),
+                    }).catch(() => {});
+                  }
                 }
               } else if (msg.type === 'error' && msg.code === 'deepgram_unavailable') {
                 setError(
@@ -332,6 +394,7 @@ export default function SessionPage() {
   const isConnecting = status === 'connecting';
   const deepgramBlocked = mode === 'hindi-urdu' && deepgramAvailable === false;
   const canStart = !isLive && !isConnecting && !deepgramBlocked;
+  const correctionCount = coaching?.corrections?.length ?? 0;
 
   return (
     <>
@@ -479,7 +542,14 @@ export default function SessionPage() {
           </div>
 
           <div style={{ ...styles.panel, borderColor: '#38bdf8' }}>
-            <div style={{ ...styles.panelHead, color: '#38bdf8' }}>OTHERS — system audio</div>
+            <div style={{ ...styles.panelHead, color: '#38bdf8' }}>
+              OTHERS — system audio
+              {correctionCount > 0 && (
+                <span style={styles.correctionCountBadge}>
+                  {correctionCount} clarified
+                </span>
+              )}
+            </div>
             <div ref={otScrollRef} style={styles.transcript}>
               {othersLines.length === 0 && (
                 <span style={styles.muted}>
@@ -490,7 +560,17 @@ export default function SessionPage() {
               {othersLines.map((l, i) => (
                 <div key={i} style={styles.line}>
                   <span style={styles.ts}>{l.ts}</span>
-                  <span>{l.cleaned}</span>
+                  {l.clarifiedByMe ? (
+                    <span style={{ flex: 1 }}>
+                      <span style={styles.clarifiedBadge}>clarified</span>
+                      <span style={{ color: '#86efac' }}>{l.corrected}</span>
+                      <span style={styles.strikethrough} title={`Original: ${l.cleaned}`}>
+                        {' '}{l.cleaned}
+                      </span>
+                    </span>
+                  ) : (
+                    <span>{l.cleaned}</span>
+                  )}
                 </div>
               ))}
             </div>
@@ -532,6 +612,17 @@ export default function SessionPage() {
                     </span>
                   </div>
                 </div>
+
+                {/* Transcript repairs — shown when corrections were applied */}
+                {correctionCount > 0 && (
+                  <div style={styles.coachSection}>
+                    <div style={styles.coachSectionLabel}>Transcript repairs</div>
+                    <div style={{ fontSize: 12, color: '#34d399', lineHeight: 1.5 }}>
+                      {correctionCount} OTHERS turn{correctionCount !== 1 ? 's' : ''} auto-corrected from your restatements.
+                      Coaching uses the corrected meanings.
+                    </div>
+                  </div>
+                )}
 
                 {/* Open items */}
                 {coaching.openItems?.length > 0 && (
@@ -720,7 +811,25 @@ const styles = {
     flexDirection: 'column',
     minHeight: 300,
   },
-  panelHead: { fontSize: 13, fontWeight: 600, marginBottom: 8 },
+  panelHead: {
+    fontSize: 13,
+    fontWeight: 600,
+    marginBottom: 8,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+  },
+  correctionCountBadge: {
+    fontSize: 9,
+    fontWeight: 700,
+    color: '#34d399',
+    background: '#052e16',
+    border: '1px solid #166534',
+    borderRadius: 4,
+    padding: '1px 6px',
+    textTransform: 'uppercase',
+    letterSpacing: '0.04em',
+  },
   transcript: {
     flex: 1,
     overflowY: 'auto',
@@ -734,6 +843,27 @@ const styles = {
   line: { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'baseline' },
   ts: { fontSize: 10, color: '#9aa0a6', flexShrink: 0 },
   hint: { fontSize: 10, color: '#9aa0a6', cursor: 'help' },
+  clarifiedBadge: {
+    fontSize: 9,
+    fontWeight: 700,
+    color: '#34d399',
+    background: '#052e16',
+    border: '1px solid #166534',
+    borderRadius: 4,
+    padding: '1px 5px',
+    marginRight: 5,
+    textTransform: 'uppercase',
+    letterSpacing: '0.04em',
+    verticalAlign: 'middle',
+    display: 'inline-block',
+  },
+  strikethrough: {
+    fontSize: 11,
+    color: '#6b7280',
+    textDecoration: 'line-through',
+    cursor: 'help',
+    marginLeft: 4,
+  },
   // Coaching panel
   coachPanel: {
     background: '#13111c',

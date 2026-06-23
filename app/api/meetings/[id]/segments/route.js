@@ -21,10 +21,11 @@ export async function POST(request, { params }) {
   const [meeting] = await sql`SELECT id FROM meetings WHERE id = ${id} AND user_email = ${session.email}`;
   if (!meeting) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  await sql`
+  const [row] = await sql`
     INSERT INTO transcript_segments (meeting_id, speaker, raw, cleaned, lang)
     VALUES (${id}, ${speaker}, ${raw}, ${cleaned || raw}, ${lang || null})
+    RETURNING id
   `;
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, segmentId: row.id });
 }
