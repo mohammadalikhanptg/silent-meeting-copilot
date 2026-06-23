@@ -16,7 +16,7 @@ function bytesToB64url(bytes) {
   return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-async function verify(token, secretStr) {
+async function verifyCookie(token, secretStr) {
   if (!token || !token.includes('.')) return null;
   const [body, sig] = token.split('.');
   if (!body || !sig) return null;
@@ -33,12 +33,39 @@ async function verify(token, secretStr) {
   }
 }
 
+function isCsrfSafe(req) {
+  const method = req.method;
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return true;
+  const host = req.nextUrl.host;
+  const origin = req.headers.get('origin');
+  const referer = req.headers.get('referer');
+  if (origin && origin !== 'null') {
+    try { return new URL(origin).host === host; } catch { return false; }
+  }
+  if (referer) {
+    try { return new URL(referer).host === host; } catch { return false; }
+  }
+  return false; // no origin or referer — reject
+}
+
 export async function middleware(req) {
   const { pathname } = req.nextUrl;
-  if (PUBLIC.some((p) => pathname === p || pathname.startsWith(p))) return NextResponse.next();
+  const isPublic = PUBLIC.some((p) => pathname === p || pathname.startsWith(p));
+
+  // CSRF: reject state-changing requests whose Origin/Referer doesn't match the app host
+  if (!isCsrfSafe(req)) {
+    return new NextResponse(JSON.stringify({ error: 'forbidden' }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (isPublic) return NextResponse.next();
+
+  // Session auth: fast cookie signature + expiry check (DB row check happens in server routes)
   const token = req.cookies.get('smc_session')?.value;
   const secretStr = process.env.AUTH_SECRET;
-  const payload = secretStr ? await verify(token, secretStr) : null;
+  const payload = secretStr ? await verifyCookie(token, secretStr) : null;
   if (!payload) {
     const url = req.nextUrl.clone();
     url.pathname = '/login';
