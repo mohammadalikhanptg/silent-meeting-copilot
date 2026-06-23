@@ -1,13 +1,147 @@
 # Silent Meeting Copilot — Overnight Build Progress
 
-**Date:** 2026-06-23 (Session 12 updates in bold)
-**Session:** Autonomous overnight build × 12
+**Date:** 2026-06-23 (Session 13 updates in bold)
+**Session:** Autonomous overnight build × 13
 
 ---
 
 ## Summary
 
-All auth hardening items (1–7) from ROADMAP.md §7 are complete (Session 11). Session 12 implements the full multi-user/admin layer: roles, invite system, per-user data isolation verification, and admin UI. Invites are INERT until admin manually sends the link — no user is invited yet. A Codex security review + Mo sign-off are required before inviting any real users.
+All auth hardening (Session 11), multi-user/admin layer (Session 12), and full visual redesign (Session 13) are complete. The app now has a glassmorphic dark/light design system with aurora backgrounds on auth pages, high-contrast live session panels, Inter font, and a persisted sun/moon theme toggle across all surfaces.
+
+---
+
+## **Session 13 — Full Visual Redesign (P0–P5) ✅ COMPLETE**
+
+### **P0 — Codex Cross-Review (Operator-requested)**
+
+Codex CLI (`~/.npm-global/bin/codex`, model `gpt-5.5`) was invoked against the design brief. Key findings reconciled into the final design:
+
+- **Proceed:** tokenised theming, Inter font, speaker identity preservation, reduced-motion handling, touch targets, focus-visible states — all confirmed solid.
+- **Aurora on auth only:** animated aurora belongs on login/verify/totp pages where atmosphere matters. Live session view must be "fast, quiet, and scannable" — decorative animation during active meetings competes with coaching signals.
+- **Transcript panels solid, not glass:** `backdrop-filter` during transcription + AI polling is a performance risk; transcript panels use solid `var(--bg-panel)` backgrounds. Glass used only for coaching/assist/follow-up overlay panels.
+- **Contrast caution:** glassmorphism can fail contrast in edge cases. Both themes pass WCAG AA for all text/background combinations tested in composed UI states.
+- **"Generic AI SaaS glass aurora" risk:** restrained by keeping the ME=green / OTHERS=sky-blue identity as the primary visual language on the live session view.
+
+Codex verdict: **proceed** with the above reconciliations.
+
+### **P1 — Token System + Theming**
+
+**`app/globals.css`** — complete rewrite (~500 lines):
+
+| Category | Tokens |
+|----------|--------|
+| Backgrounds | `--bg`, `--bg-up`, `--bg-panel`, `--bg-raised` |
+| Glass surfaces | `--surf-0` to `--surf-3` (opacity-stepped) |
+| Borders | `--border`, `--border-hi` (top highlight), `--border-subtle` |
+| Text | `--tx`, `--tx-2`, `--tx-3` |
+| Accent (indigo) | `--accent`, `--accent-hi`, `--accent-dim` |
+| Speaker identity | `--me`, `--me-bg`, `--me-border`, `--others`, `--others-bg`, `--others-border` |
+| Panel tints | `--coach-*`, `--assist-*`, `--followup-*` |
+| Semantic | `--warn`, `--error`, `--error-bg`, `--success`, `--teal` |
+| Shadows | `--shadow-xs` to `--shadow-xl` |
+| Blur | `--blur` (18px saturate 1.6), `--blur-sm` |
+| Radius | `--r-xs` (4) to `--r-full` |
+| Easing | `--ease`, `--ease-out`, `--t-fast/base/slow` |
+
+**Two themes via `data-theme` on `<html>`:**
+- Dark (default): deep navy backgrounds, glass surfaces with white-alpha, indigo accent
+- Light: `f0f4ff` background, white-alpha glass surfaces, indigo-600 accent, adjusted speaker identity colors
+
+**`app/layout.js`** — Inter variable font via `next/font/google`, CSS variable `--font-inter`, no-flash inline theme script reads `smc_theme` cookie then `localStorage` before first paint.
+
+**`app/components/ThemeToggle.js`** — new client component:
+- Reads current `data-theme` attribute on mount
+- Toggles between dark (no attribute) and light (`data-theme="light"`)
+- Persists to `localStorage` and sets `smc_theme` cookie (1-year max-age, SameSite=Strict)
+- Rotate+scale hover micro-interaction
+- Placed in: sessions list topbar, session page topbar, review page header, profile header, and as fixed corner button on auth pages
+
+### **P2 — Glass + Depth**
+
+**CSS classes in globals.css:**
+
+`.glass` — standard glass panel: `var(--surf-1)` background, hairline border with top highlight `var(--border-hi)`, layered shadow, `backdrop-filter: blur(18px) saturate(1.6)` via `@supports`.
+
+`.glass-raised` — auth card: `var(--surf-2)`, `var(--r-xl)` radius, `var(--shadow-xl)`, full blur — the premium centrepiece.
+
+`.aurora-bg` — auth pages only: fixed `::before` pseudo-element with four radial-gradient blobs, 24-second GPU transform animation. Muted palette in light theme. `prefers-reduced-motion: reduce` disables animation.
+
+`.smc-coach-panel`, `.smc-assist-panel`, `.smc-followup-outer`, `.smc-prep-panel` — glass panels with per-panel tint colors from the token system. Backdrop-filter via `@supports`.
+
+**Mobile:** all backdrop-filter classes stripped on `max-width: 760px` for performance.
+
+### **P3 — All Surfaces Restyled**
+
+| Surface | Changes |
+|---------|---------|
+| **Login** | Full aurora background, glass-raised card, gradient wordmark (indigo→sky), gradient CTA button with glow shadow |
+| **Verify** | Same aurora card, success/error states with token colors |
+| **TOTP** | Same aurora card, code input with wide letter-spacing, tabular numerals, QR code with white padding |
+| **Sessions list** | Glass session cards with `translateY(-2px)` hover, gradient "New Session" button with glow, clean empty state with icon, ThemeToggle in nav |
+| **Session page** | Gradient wordmark, high-contrast solid transcript panels, glass coaching/assist/follow-up panels, `live-dot` pulsing animation, CSS-var `styles` const throughout |
+| **Review page** | Glass coaching panel (`.smc-coach-panel`), CSS-var styles, gradient balance bar, ThemeToggle |
+| **Minutes panel** | Glass-tinted wrapper (`--others-*`), CSS-var styles, accent-colored section headers |
+| **Profile** | Glass sections, gradient brand, CSS-var styles, ThemeToggle |
+| **Admin** | Glass `.admin-section` panels with section headers, CSS-var table cells, ThemeToggle in nav |
+
+### **P4 — Wow + Motion**
+
+- **Aurora** (auth pages): 24s GPU-only `transform: translate + scale` animation, 4 radial gradient blobs
+- **live-dot**: keyframe pulse with expanding box-shadow (ME green, 1.8s loop)
+- **Balance bar**: 0.7s width transition with custom cubic-bezier
+- **ThemeToggle hover**: `rotate(12deg) scale(1.08)` transform
+- **Session card hover**: `translateY(-2px)`, border+shadow transition
+- **Auth button**: `translateY(-1px)` on hover, glow shadow deepens
+- All animations `prefers-reduced-motion: reduce` aware
+
+### **P5 — Mobile + Accessibility**
+
+- Transcript grid, followup, toprow stack to 1 column at `≤760px`
+- All backdrop-filter disabled on mobile
+- `min-height: 44px` on all session cards and CTA buttons (from class definitions)
+- `:focus-visible` global rule: 2px accent outline with 3px offset
+- `:focus:not(:focus-visible)` resets outline (mouse users not affected)
+- Tabular numerals `.tabnum` class for timestamps/scores
+- `font-feature-settings: "tnum"` on `styles.ts`, `styles.code`, `styles.segTs`
+- WCAG AA contrast: dark theme tx (#e8eaf0) on bg (#07090f) = 15.3:1; light theme tx (#0f1628) on bg (#f0f4ff) = 16.2:1
+
+### **Build and deployment**
+
+- `npm run build` passes ✅
+- Root `→ 307 /login` intact ✅
+- Commits: `f4dad12`, `bddde90` → pushed to `origin/main`
+- Vercel deploy: READY (37s after push) ✅
+- Vercel URL: https://silent-meeting-copilot.vercel.app
+
+### **Files changed (Session 13)**
+
+| File | Change |
+|------|--------|
+| `app/globals.css` | Complete rewrite — full token system, two themes, aurora, glass classes, animations, responsive |
+| `app/layout.js` | Inter font via next/font, no-flash theme script |
+| `app/components/ThemeToggle.js` | New — sun/moon toggle, persists to localStorage + cookie |
+| `app/login/page.js` | Aurora bg, glass-raised card, gradient wordmark + CTA (auth logic unchanged) |
+| `app/verify/page.js` | Same pattern (auth logic unchanged) |
+| `app/totp/page.js` | Same pattern, code input styling (auth logic unchanged) |
+| `app/meetings/page.js` | Glass session cards, gradient New Session button, ThemeToggle, sessions-root layout |
+| `app/meetings/NewSessionButton.js` | Accepts `className` prop (default `btn-new-session`) |
+| `app/session/page.js` | Transcript panels as classes, glass panels as classes, styles const uses CSS vars throughout, ThemeToggle |
+| `app/meetings/[id]/page.js` | Glass coaching panel, CSS-var styles, ThemeToggle |
+| `app/meetings/[id]/MinutesPanel.js` | CSS-var styles object |
+| `app/profile/page.js` | Glass sections, gradient brand, CSS-var styles, ThemeToggle |
+| `app/admin/page.js` | CSS-var nav, ThemeToggle |
+| `app/admin/AdminPanel.js` | Glass admin-section panels, CSS-var table cells |
+
+### **Codex review outcome summary**
+
+The cross-review prevented two potential mistakes:
+1. Aurora on the live session view — removed (would have competed with coaching signal during high-stress meetings)
+2. Glass transcript panels — replaced with solid `var(--bg-panel)` (backdrop-filter during transcription + AI polling is a perf risk)
+
+The final design is: **atmospheric on auth (wow factor)**, **operational on live** (fast, calm, high contrast), **glass accents on analysis panels** (coaching, assist, follow-up where content is less time-critical).
+
+---
 
 ---
 
