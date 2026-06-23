@@ -4,6 +4,7 @@ import { getSql } from '../../../lib/db';
 import {
   getPrePayload, generateTotpSecret, otpauthUri, verifyTotp,
   sessionCookieValue, cookieOptions, SESSION_COOKIE, SESSION_MAXAGE, PRE_COOKIE,
+  isAllowed,
 } from '../../../lib/auth';
 
 export const runtime = 'nodejs';
@@ -31,6 +32,9 @@ export async function GET() {
 export async function POST(req) {
   const pre = await getPrePayload();
   if (!pre) return NextResponse.json({ error: 'no_pre' }, { status: 401 });
+
+  // Re-check allowlist at session creation — covers email removed after link was sent
+  if (!isAllowed(pre.email)) return NextResponse.json({ error: 'not_allowed' }, { status: 403 });
 
   let body;
   try { body = await req.json(); } catch { body = {}; }
