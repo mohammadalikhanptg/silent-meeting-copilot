@@ -1,13 +1,266 @@
 # Silent Meeting Copilot — Overnight Build Progress
 
-**Date:** 2026-06-23 (Session 5 updates in bold)
-**Session:** Autonomous overnight build × 5
+**Date:** 2026-06-23 (Session 6 updates in bold)
+**Session:** Autonomous overnight build × 6
 
 ---
 
 ## Summary
 
-All four tasks (P1–P4) across all sessions are complete at maximum completable state on this Mac. Session 5 delivers repeat-back repair (the operator's cheat code for garbled OTHERS transcripts), Deepgram diarization, schema columns for corrections, and UI rendering of clarified turns.
+All tasks (P1–P4) across all sessions are complete at maximum completable state on this Mac. Session 6 delivers Live Assist — a background track that surfaces copy-paste-ready information mid-meeting: the operator's own profile facts and on-demand web search cards.
+
+---
+
+## **Session 6 — Live Assist ✅ COMPLETE**
+
+### **P0 — Stabilisation**
+
+- Engine `/health` returns `{"ok":true,"provider":"cloudflare","deepgramAvailable":false}` ✅
+- Site root `https://silent-meeting-copilot.vercel.app/` → 307 `/login` ✅
+- Local `npm run build` passed before any changes were made ✅
+
+### **P1 — Operator profile**
+
+#### Schema (appended to `scripts/migrate.mjs`)
+
+```sql
+CREATE TABLE IF NOT EXISTS user_profiles (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_email    text UNIQUE NOT NULL,
+  businesses    jsonb NOT NULL DEFAULT '[]'::jsonb,
+  postal_address text,
+  phone         text,
+  emails        jsonb NOT NULL DEFAULT '[]'::jsonb,
+  social_links  jsonb NOT NULL DEFAULT '[]'::jsonb,
+  bio           text,
+  common_items  jsonb NOT NULL DEFAULT '[]'::jsonb,
+  updated_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_user_profiles_email ON user_profiles (user_email);
+```
+
+Idempotent (`CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`). Applied on deploy.
+
+#### Seeded profile
+
+On first visit to `/api/profile`, if no profile exists, one is created with:
+- **Businesses**: Pacific Technology Group (`pacific.london`) and Pacific Infotech (`pacificinfotech.co.uk`)
+- **Emails**: `ali@pacific.london` (Work), `ali@pacificinfotech.co.uk` (Managed services)
+- **Phone, postal_address, bio**: intentionally blank — operator fills in via `/profile`
+
+No personal data is fabricated. Only public business facts are seeded.
+
+#### API routes
+
+| Route | Method | Action |
+|-------|--------|--------|
+| `/api/profile` | `GET` | Return profile (auto-seeds on first call) |
+| `/api/profile` | `PUT` | Update all profile fields |
+
+Both protected by `getSessionPayload()`. No auth files modified.
+
+#### Profile page (`/profile`)
+
+Full-featured edit page with sections for:
+- Businesses (name, website, blog) — add/remove rows
+- Phone, postal address
+- Email addresses (label + value) — add/remove rows
+- Social / links (label + URL) — add/remove rows
+- Short bio
+- Common things I share (label + value) — custom items the operator pastes regularly
+
+Info banner explains the seeded fields and that personal data is blank by design.
+Accessible from home page ("My Profile" button) and from the Assist panel ("Edit profile" link).
+
+### **P2 — Assist cards from operator's own facts**
+
+#### How detection works (`worker/src/session-do.js`)
+
+`detectProfileAssists(recentLines, profile)` scans the last 20 transcript lines (10 ME + 10 OTHERS).
+
+**Trigger categories:**
+
+| Category | Example trigger phrases |
+|----------|------------------------|
+| `website` | "my website", "our site", "visit us at", "find us online" |
+| `blog` | "our blog", "my blog", "blog post" |
+| `email` | "email me", "contact us", "get in touch", "my email" |
+| `phone` | "call me", "our number", "phone number", "give me a call" |
+| `address` | "our address", "office address", "where to find us" |
+| `bio` | "about me", "my background", "what we do" |
+| custom | Each `common_items[].label` is matched literally |
+| social | Each `social_links[].label` is matched literally |
+| business name | Business name (or any word >4 chars from name) appears in text + website is set |
+
+**What gets surfaced:**
+- If the field exists in profile → copy-paste card with canonical value
+- If the field is blank (e.g. phone not set) → gentle "Not in your profile yet" hint card with link to `/profile`
+- Values are NEVER fabricated — only profile data is shown
+
+#### Response format (addition to `POST /coach`)
+
+```json
+{
+  "assists": [
+    {"type": "my-info", "label": "Pacific Technology Group website", "value": "pacific.london"},
+    {"type": "my-info", "label": "Phone", "value": "", "missing": true}
+  ]
+}
+```
+
+### **P3 — Lookup cards**
+
+#### How detection works
+
+`detectLookupIntents(recentLines)` scans only ME lines (operator signals the lookup, not OTHERS).
+
+**Trigger phrases:**
+- `let me google`, `i'll google`, `let me search`, `i'll search`
+- `let me look up`, `i'll look up`, `let me find`, `i'll find`
+- `let me check online`, `if you search`, `if you google`, `if you look up`
+- `search for`, `google for`, `look up`
+
+`extractLookupQuery(line)` strips the trigger phrase and leading filler (`for the`, `a`, `an`) to extract the raw query.
+
+**Instant card — always produced (no API key needed):**
+```json
+{
+  "type": "lookup",
+  "label": "Search: best lakes in the Lake District",
+  "value": "https://www.google.com/search?q=best+lakes+in+the+Lake+District",
+  "query": "best lakes in the Lake District",
+  "results": []
+}
+```
+
+**Real results — produced only when SEARCH_API_KEY is configured:**
+
+Brave Search API is called at `https://api.search.brave.com/res/v1/web/search`. Top 3 results (title, URL, snippet) are appended to the card's `results` array. Each result has its own "Copy link" button in the Assist panel.
+
+**To enable Brave Search:**
+```bash
+cd ~/claude-workspace/silent-meeting-copilot/worker
+wrangler secret put SEARCH_API_KEY
+```
+Get a free Brave Search API key at https://brave.com/search/api/ (free tier: 2,000 queries/month).
+
+Without the key, the Google search URL card is still produced instantly — always useful for copy-paste into a meeting chat.
+
+### **P4 — Assist panel**
+
+New amber-accented panel on `/session` page, below the Coaching panel.
+
+**Behaviour:**
+- Appears when status is `live` or `stopped`
+- Profile fetched on mount (fire-and-forget), stored in `profileRef`
+- Profile passed to worker on every 25s coaching poll
+- Assist cards accumulate across polls (deduplicated by `type:label:value` key)
+- Cards are never de-duplicated across polls — each unique card appears once
+- "Clear all" button resets the card list and dedup set
+- "Edit profile" link opens `/profile`
+
+**Card layout:**
+- `my-info` cards: dark blue background, blue "my info" badge, monospace value, Copy button
+- `lookup` cards: dark amber background, amber "search" badge, search URL, optional result list
+- Missing-field cards: italic hint with link to `/profile` (no Copy button, no fabricated value)
+- Mobile-responsive: `auto-fill` grid, min 260px per card
+
+### **P5 — Tests**
+
+```bash
+node scripts/test-assist.mjs
+
+Test 1: website reference → profile assist card
+  ✅ at least one assist card produced
+  ✅ pacific.london in cards
+  ✅ card type is my-info
+  ✅ no missing-value cards when website is set
+
+Test 2: lookup intent → search URL card
+  ✅ exactly one lookup query detected
+  ✅ query includes "lake"
+  ✅ search URL is valid Google URL
+  ✅ search URL includes query term
+  ✅ card type is lookup
+  ✅ card has non-empty value
+
+Test 3: unrelated sentence → no spurious assist card
+  ✅ no profile assist cards from unrelated sentences
+  ✅ no lookup queries from unrelated sentences
+
+Test 4: email reference → email assist cards
+  ✅ Work email in cards
+  ✅ Managed services email in cards
+
+Test 5: phone reference with blank profile → missing hint
+  ✅ missing phone card surfaced when phone not set
+  ✅ missing phone card has empty value (not fabricated)
+
+Test 6: common item label in transcript → custom card
+  ✅ Calendly custom item card found
+  ✅ Calendly URL correct
+
+Test 7: "if you search X" form also detected
+  ✅ one lookup query detected from "if you search" form
+  ✅ query includes GDPR
+
+──────────────────────────────────────────────────
+Results: 20 passed, 0 failed
+All tests passed ✅
+```
+
+**Live worker acceptance test (PASSED 2026-06-23):**
+
+```bash
+# P2: website reference → pacific.london card
+curl -s -X POST "https://smc-engine.ali-6b8.workers.dev/coach" \
+  -H "Content-Type: application/json" \
+  -d '{"me":["anyone can visit my website to learn more about what we do"],"others":["Oh great what is the address?"],"profile":{"businesses":[{"name":"Pacific Technology Group","website":"pacific.london"}],"emails":[{"label":"Work","value":"ali@pacific.london"}],"phone":"","postal_address":"","social_links":[],"bio":"","common_items":[]}}' | python3 -m json.tool
+# "assists": [{"type":"my-info","label":"Pacific Technology Group website","value":"pacific.london"}] ✅
+
+# P3: lookup intent → Google search URL card
+curl -s -X POST "https://smc-engine.ali-6b8.workers.dev/coach" \
+  -H "Content-Type: application/json" \
+  -d '{"me":["let me google the best lakes in the Lake District","I think we should move on","Happy to share that research"],"others":["Sure","No problem","Thanks"],"profile":null}' | python3 -m json.tool
+# "assists": [{"type":"lookup","label":"Search: best lakes in the Lake District","value":"https://www.google.com/search?q=best%20lakes%20in%20the%20Lake%20District",...}] ✅
+```
+
+**Vercel deployment (PASSED 2026-06-23):**
+- `npm run build` passed ✅
+- `git push origin main` → commit `49af95f` ✅
+- Vercel: READY ✅
+- Site root: 307 → /login ✅
+
+### **Files changed (Session 6)**
+
+| File | Change |
+|------|--------|
+| `scripts/migrate.mjs` | Appended `user_profiles` table + index (idempotent) |
+| `app/api/profile/route.js` | New — GET (auto-seed) + PUT |
+| `app/profile/page.js` | New — full profile edit page with all fields |
+| `app/page.js` | Added "My Profile" button linking to `/profile` |
+| `app/session/page.js` | Profile fetch on mount, profile passed to coach poll, assist card accumulation, Assist panel render + styles |
+| `worker/src/session-do.js` | `detectProfileAssists()`, `detectLookupIntents()`, `fetchBraveResults()`, `generateAssists()`, `generateCoaching()` extended with `profile` param and `assists` in response |
+| `scripts/test-assist.mjs` | New — 7 test cases, 20 assertions, all pass |
+
+---
+
+### **What the operator should do next**
+
+1. **Sign in and fill in personal profile fields** — go to https://silent-meeting-copilot.vercel.app/profile
+   - Add phone number
+   - Add postal address
+   - Add short bio
+   - Add any common links (Calendly, proposal URL, deck, pricing page, etc.)
+2. **Enable Brave Search for real lookup results** (optional):
+   ```bash
+   cd ~/claude-workspace/silent-meeting-copilot/worker
+   wrangler secret put SEARCH_API_KEY
+   ```
+   Free tier at https://brave.com/search/api/ — 2,000 queries/month.
+3. **Test Live Assist in a real session**: start `/session`, say "anyone can visit my website" — the Assist panel should show the pacific.london card within 25 seconds (next coaching poll). Then say "let me google [something]" — a search URL card should appear.
+
+---
 
 ---
 
@@ -457,6 +710,8 @@ npx wrangler secret put DEEPGRAM_API_KEY
 | `2bb6521` | feat(P1-P4): live coaching panel, session persistence, meetings review |
 | `66ab737` | docs: PROGRESS.md — Session 4 build summary (coaching, persistence, meetings) |
 | `e2386f2` | feat(P1-P4): repeat-back repair, diarization, clarified badge |
+| `dbfb446` | docs: PROGRESS.md — Session 5 build summary (repeat-back repair + diarization) |
+| `49af95f` | feat(P1-P4): Live Assist — profile cards, lookup detection, Assist panel |
 
 ---
 
