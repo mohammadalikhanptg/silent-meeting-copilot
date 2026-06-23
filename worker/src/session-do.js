@@ -707,6 +707,135 @@ Return ONLY the JSON object, no preamble.`;
   return { assist_text, references };
 }
 
+// ---------------------------------------------------------------------------
+// Session 8 — Meeting minutes generation
+// ---------------------------------------------------------------------------
+
+// Generate structured meeting minutes from the full transcript.
+// Called by POST /minutes on the worker.
+// Returns a structured object safe to render or pass to the docx renderer.
+export async function generateMinutes({ me = [], others = [], title = '', date = '', objective = '', contextNotes = '' }, env) {
+  const totalLines = me.length + others.length;
+
+  if (totalLines < 2) {
+    return {
+      emptyState: true,
+      title: title || 'Untitled session',
+      date,
+      participants: [],
+      executiveSummary: 'No transcript was recorded for this session.',
+      keyPoints: [],
+      decisions: [],
+      actionItems: [],
+    };
+  }
+
+  // Build a transcript excerpt; limit to avoid token overflow.
+  const meRecent = me.slice(-30);
+  const othersRecent = others.slice(-30);
+  const transcriptText = [
+    ...meRecent.map(l => `ME: ${l}`),
+    ...othersRecent.map(l => `OTHERS: ${l}`),
+  ].join('\n');
+
+  const objectiveLine = objective ? `Objective: ${objective}\n` : '';
+  const contextLine = contextNotes ? `Context: ${contextNotes}\n` : '';
+
+  const prompt = `You are a professional meeting secretary producing formal minutes.
+
+Meeting: "${title || 'Untitled session'}"
+Date: ${date || 'Unknown'}
+${objectiveLine}${contextLine}
+Transcript:
+${transcriptText}
+
+STRICT RULES:
+- Participants: label as "Operator (Me)" for ME lines and "Other participant(s)" for OTHERS lines UNLESS real names are explicitly stated in the transcript. NEVER invent names.
+- Executive summary: 2-3 sentences; factual only.
+- Key discussion points: up to 6 bullets; only topics actually discussed.
+- Decisions: only decisions clearly stated. Empty array if none.
+- Action items: only actions clearly assigned or agreed. Each needs "owner" (Me / Others / real name if stated), "action" (what to do), "due" (deadline if stated, else ""). Empty array if none.
+- NEVER invent facts not in the transcript.
+
+Return ONLY this JSON:
+{
+  "participants": ["Operator (Me)", "Other participant(s)"],
+  "executiveSummary": "...",
+  "keyPoints": ["...", "..."],
+  "decisions": ["...", "..."],
+  "actionItems": [{"owner": "...", "action": "...", "due": ""}]
+}`;
+
+  try {
+    const llmResult = await env.AI.run('@cf/meta/llama-3.2-3b-instruct', {
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a meeting secretary. Extract factual meeting minutes from transcripts. Return ONLY the JSON object, starting with { and ending with }.',
+        },
+        { role: 'user', content: prompt },
+      ],
+      max_tokens: 900,
+    });
+
+    const rawResponse = llmResult.response;
+    let parsed = null;
+
+    if (rawResponse && typeof rawResponse === 'object') {
+      parsed = rawResponse;
+    } else {
+      const responseText = (typeof rawResponse === 'string' ? rawResponse : '').trim();
+      if (responseText) {
+        try {
+          const match = responseText.match(/\{[\s\S]*\}/);
+          if (match) parsed = JSON.parse(match[0]);
+        } catch (_) {}
+      }
+    }
+
+    if (!parsed) {
+      return {
+        emptyState: false,
+        title: title || 'Untitled session',
+        date,
+        participants: ['Operator (Me)', 'Other participant(s)'],
+        executiveSummary: 'Unable to generate summary from this transcript.',
+        keyPoints: [],
+        decisions: [],
+        actionItems: [],
+      };
+    }
+
+    return {
+      emptyState: false,
+      title: title || 'Untitled session',
+      date,
+      participants: Array.isArray(parsed.participants) ? parsed.participants.map(String) : ['Operator (Me)', 'Other participant(s)'],
+      executiveSummary: String(parsed.executiveSummary || '').trim(),
+      keyPoints: Array.isArray(parsed.keyPoints) ? parsed.keyPoints.filter(s => typeof s === 'string' && s.trim()) : [],
+      decisions: Array.isArray(parsed.decisions) ? parsed.decisions.filter(s => typeof s === 'string' && s.trim()) : [],
+      actionItems: Array.isArray(parsed.actionItems)
+        ? parsed.actionItems.filter(a => a && typeof a === 'object' && a.action).map(a => ({
+            owner: String(a.owner || 'Unassigned').trim(),
+            action: String(a.action || '').trim(),
+            due: String(a.due || '').trim(),
+          }))
+        : [],
+    };
+  } catch (err) {
+    return {
+      emptyState: false,
+      title: title || 'Untitled session',
+      date,
+      participants: [],
+      executiveSummary: `Minutes generation failed: ${String(err.message || err)}`,
+      keyPoints: [],
+      decisions: [],
+      actionItems: [],
+    };
+  }
+}
+
 // Generate live coaching from accumulated ME/OTHERS transcript lines.
 // Called by POST /coach. Returns structured coaching object.
 //

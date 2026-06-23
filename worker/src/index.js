@@ -1,4 +1,4 @@
-import { SessionDO, transcribeAndClean, generateCoaching, enrichFlaggedItem } from './session-do.js';
+import { SessionDO, transcribeAndClean, generateCoaching, enrichFlaggedItem, generateMinutes } from './session-do.js';
 
 export { SessionDO };
 
@@ -73,6 +73,20 @@ export default {
         return json({ ok: true, ...result });
       } catch (err) {
         console.error('Enrich-flag error:', err);
+        return json({ error: String(err) }, 500);
+      }
+    }
+
+    // POST /minutes — generate structured meeting minutes from a full transcript
+    // Body: {me: string[], others: string[], title: string, date: string, objective?: string, contextNotes?: string}
+    // Returns: {ok, emptyState, title, date, participants, executiveSummary, keyPoints, decisions, actionItems}
+    if (url.pathname === '/minutes' && request.method === 'POST') {
+      try {
+        const body = await request.json();
+        const result = await generateMinutes(body, env);
+        return json({ ok: true, ...result });
+      } catch (err) {
+        console.error('Minutes error:', err);
         return json({ error: String(err) }, 500);
       }
     }

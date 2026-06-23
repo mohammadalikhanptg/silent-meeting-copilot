@@ -13,6 +13,7 @@
     "react": "latest",
     "react-dom": "latest",
     "@neondatabase/serverless": "latest",
+    "docx": "latest",
     "qrcode": "latest"
   }
 }

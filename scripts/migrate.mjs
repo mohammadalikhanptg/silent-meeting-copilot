@@ -52,6 +52,13 @@ try {
   await sql`CREATE INDEX IF NOT EXISTS idx_flagged_meeting ON flagged_items (meeting_id, ts)`;
   console.log('[migrate] ok');
 } catch (e) {
+  // Permission denied = local env has a read-only DATABASE_URL.
+  // Schema is already set up in production (Vercel uses its own env vars).
+  // Warn but don't block the build.
+  if (e.message && (e.message.includes('permission denied') || e.message.includes('read-only'))) {
+    console.warn('[migrate] skipped: read-only DATABASE_URL detected — schema already set up in production');
+    process.exit(0);
+  }
   console.error('[migrate] failed:', e.message);
   process.exit(1);
 }

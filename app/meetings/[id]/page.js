@@ -1,6 +1,7 @@
 import { redirect, notFound } from 'next/navigation';
 import { getSessionPayload } from '../../lib/auth';
 import { getSql } from '../../lib/db';
+import MinutesPanel from './MinutesPanel';
 
 export const dynamic = 'force-dynamic';
 
@@ -164,6 +165,9 @@ export default async function MeetingDetailPage({ params }) {
           </div>
         </div>
       )}
+
+      {/* Minutes export */}
+      <MinutesPanel meetingId={id} />
 
       {/* Flagged items — follow-up tracker review */}
       {flaggedItems.length > 0 && (
