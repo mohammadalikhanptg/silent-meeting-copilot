@@ -366,13 +366,254 @@ Based on the restatement, reconstruct what the original speaker most likely said
   }
 }
 
+// ---------------------------------------------------------------------------
+// P2 — Profile-based assist cards
+// ---------------------------------------------------------------------------
+
+// Phrases that indicate the operator is referencing something about themselves/their business.
+// Keyed by category so we know which profile field to surface.
+const PROFILE_TRIGGERS = {
+  website: [
+    'my website', 'our website', 'our site', 'my site', 'company website',
+    'company site', 'our web', 'visit us at', 'find us online', 'check us out online',
+    'go to our', 'check our website', 'the website',
+  ],
+  blog: [
+    'our blog', 'my blog', 'company blog', 'our articles', 'read more on our',
+    'blog post', 'check our blog',
+  ],
+  email: [
+    'email me', 'email us', 'drop me an email', 'send me an email',
+    'contact me', 'contact us', 'reach me', 'reach us', 'get in touch',
+    'my email', 'our email',
+  ],
+  phone: [
+    'call me', 'call us', 'ring me', 'ring us', 'phone me', 'phone us',
+    'our number', 'my number', 'phone number', 'give me a call', 'give us a call',
+  ],
+  address: [
+    'our address', 'my address', 'our office', 'come to us', 'postal address',
+    'our location', 'where we are', 'where to find us', 'office address',
+  ],
+  bio: [
+    'about me', 'about us', 'my background', 'my experience', 'who i am',
+    'what i do', 'what we do',
+  ],
+};
+
+// Detect whether any of the most recent transcript lines references a profile field.
+// Returns an array of assist cards (deduplicated by value).
+function detectProfileAssists(recentLines, profile) {
+  if (!profile) return [];
+
+  const text = recentLines.join(' ').toLowerCase();
+  const cards = [];
+  const seenValues = new Set();
+
+  const addCard = (label, value) => {
+    const key = `${label}:${value}`;
+    if (!value || seenValues.has(key)) return;
+    seenValues.add(key);
+    cards.push({ type: 'my-info', label, value });
+  };
+
+  // Check website references — surface each business website
+  if (PROFILE_TRIGGERS.website.some(t => text.includes(t))) {
+    for (const biz of (profile.businesses || [])) {
+      if (biz.website) addCard(`${biz.name} website`, biz.website);
+    }
+  }
+
+  // Check blog references
+  if (PROFILE_TRIGGERS.blog.some(t => text.includes(t))) {
+    for (const biz of (profile.businesses || [])) {
+      if (biz.blog) addCard(`${biz.name} blog`, biz.blog);
+    }
+  }
+
+  // Check business name references — if someone says "Pacific Technology" or "Pacific Infotech"
+  for (const biz of (profile.businesses || [])) {
+    if (!biz.name) continue;
+    const nameLower = biz.name.toLowerCase();
+    // Only trigger if BOTH the name appears AND a contextual word suggests sharing the URL
+    const nameInText = text.includes(nameLower) || (
+      nameLower.split(' ').filter(w => w.length > 4).some(word => text.includes(word))
+    );
+    if (nameInText && biz.website) {
+      // Only surface if the URL hasn't already been added
+      addCard(`${biz.name} website`, biz.website);
+    }
+  }
+
+  // Email references
+  if (PROFILE_TRIGGERS.email.some(t => text.includes(t))) {
+    for (const em of (profile.emails || [])) {
+      if (em.value) addCard(`Email (${em.label || 'work'})`, em.value);
+    }
+  }
+
+  // Phone references
+  if (PROFILE_TRIGGERS.phone.some(t => text.includes(t))) {
+    if (profile.phone) addCard('Phone', profile.phone);
+    else cards.push({ type: 'my-info', label: 'Phone', value: '', missing: true });
+  }
+
+  // Address references
+  if (PROFILE_TRIGGERS.address.some(t => text.includes(t))) {
+    if (profile.postal_address) addCard('Postal address', profile.postal_address);
+    else cards.push({ type: 'my-info', label: 'Postal address', value: '', missing: true });
+  }
+
+  // Bio references
+  if (PROFILE_TRIGGERS.bio.some(t => text.includes(t))) {
+    if (profile.bio) addCard('Bio', profile.bio);
+  }
+
+  // Common items — scan for each item's label
+  for (const item of (profile.common_items || [])) {
+    if (!item.label || !item.value) continue;
+    if (text.includes(item.label.toLowerCase())) {
+      addCard(item.label, item.value);
+    }
+  }
+
+  // Social links — scan for platform name or label
+  for (const link of (profile.social_links || [])) {
+    if (!link.label || !link.url) continue;
+    if (text.includes(link.label.toLowerCase())) {
+      addCard(link.label, link.url);
+    }
+  }
+
+  return cards;
+}
+
+// ---------------------------------------------------------------------------
+// P3 — Lookup intent detection + search
+// ---------------------------------------------------------------------------
+
+const LOOKUP_TRIGGERS = [
+  'let me google',
+  "i'll google",
+  'let me search',
+  "i'll search",
+  'let me look up',
+  "i'll look up",
+  'let me look that up',
+  "i'll look that up",
+  'let me find',
+  "i'll find",
+  'let me check online',
+  "i'll check online",
+  'let me check that online',
+  'if you search',
+  'if you google',
+  'if you look up',
+  'search for',
+  'google for',
+  'look up',
+];
+
+// Extract the query from a lookup trigger phrase.
+// e.g. "let me google the best lakes in the Lake District" → "the best lakes in the Lake District"
+function extractLookupQuery(line) {
+  const lineLower = line.toLowerCase();
+  for (const trigger of LOOKUP_TRIGGERS) {
+    const idx = lineLower.indexOf(trigger);
+    if (idx !== -1) {
+      const after = line.slice(idx + trigger.length).trim();
+      // Strip leading filler words like "for", "the", "a"
+      const query = after.replace(/^(for|the|a|an)\s+/i, '').trim();
+      if (query.length > 3) return query;
+    }
+  }
+  return null;
+}
+
+// Scan recent lines for lookup intent; return list of queries (deduplicated).
+function detectLookupIntents(recentLines) {
+  const queries = [];
+  const seen = new Set();
+  for (const line of recentLines) {
+    const q = extractLookupQuery(line);
+    if (q && !seen.has(q.toLowerCase())) {
+      seen.add(q.toLowerCase());
+      queries.push(q);
+    }
+  }
+  return queries;
+}
+
+// Build a Google search URL for a query.
+function buildSearchUrl(query) {
+  return `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+}
+
+// Fetch top results from Brave Search API.
+// Requires SEARCH_API_KEY in worker env (Brave API key).
+// Returns [] on any failure — never fabricates results.
+async function fetchBraveResults(query, apiKey) {
+  try {
+    const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=3&search_lang=en`;
+    const resp = await fetch(url, {
+      headers: {
+        Accept: 'application/json',
+        'Accept-Encoding': 'gzip',
+        'X-Subscription-Token': apiKey,
+      },
+    });
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    const results = (data?.web?.results || []).slice(0, 3);
+    return results.map(r => ({
+      title: r.title || '',
+      url: r.url || '',
+      snippet: (r.description || '').slice(0, 200),
+    }));
+  } catch (_) {
+    return [];
+  }
+}
+
+// Generate assist cards: profile-based + lookup intents.
+// Called from generateCoaching() — profile is passed in from the client.
+async function generateAssists(recentMe, recentOthers, profile, env) {
+  const allRecent = [...recentMe.slice(-10), ...recentOthers.slice(-10)];
+  const cards = [];
+
+  // Profile-based cards from last 20 lines
+  const profileCards = detectProfileAssists(allRecent, profile);
+  cards.push(...profileCards);
+
+  // Lookup intents — only from ME lines (operator signals the lookup)
+  const queries = detectLookupIntents(recentMe.slice(-10));
+  for (const query of queries) {
+    const searchUrl = buildSearchUrl(query);
+    const card = {
+      type: 'lookup',
+      label: `Search: ${query}`,
+      value: searchUrl,
+      query,
+      results: [],
+    };
+
+    // Fetch real results if Brave key is configured
+    if (env.SEARCH_API_KEY) {
+      card.results = await fetchBraveResults(query, env.SEARCH_API_KEY);
+    }
+    cards.push(card);
+  }
+
+  return cards;
+}
+
 // Generate live coaching from accumulated ME/OTHERS transcript lines.
 // Called by POST /coach. Returns structured coaching object.
 //
 // P1: Also detects repeat-back patterns (ME restating garbled OTHERS) and returns
 // corrections. Coaching analysis uses corrected OTHERS text and excludes ME
 // restatement turns from argument analysis (though they still count for talk balance).
-export async function generateCoaching({ me = [], others = [], objective = '' }, env) {
+export async function generateCoaching({ me = [], others = [], objective = '', profile = null }, env) {
   // Talk time balance — computed from ALL ME words including restatements
   const countWords = (lines) => lines.join(' ').split(/\s+/).filter(Boolean).length;
   const meWords = countWords(me);
@@ -408,14 +649,17 @@ export async function generateCoaching({ me = [], others = [], objective = '' },
   const restatementIndices = new Set(corrections.map(c => c.meIndex));
   const effectiveMe = me.filter((_, i) => !restatementIndices.has(i));
 
-  // Return fast defaults if there's not enough content to analyse
+  // Return fast defaults if there's not enough content for coaching analysis.
+  // Assists still run — profile lookups and search intents fire even with a short transcript.
   if (effectiveMe.length + effectiveOthers.length < 3 || total < 20) {
+    const earlyAssists = await generateAssists(effectiveMe, effectiveOthers, profile, env);
     return {
       talkBalance: { mePercent, othersPercent },
       openItems: [],
       suggestions: ['Keep speaking — coaching will appear once there is enough transcript.'],
       alignment: '',
       corrections,
+      assists: earlyAssists,
     };
   }
 
@@ -463,11 +707,15 @@ export async function generateCoaching({ me = [], others = [], objective = '' },
     // LLM failed — return safe defaults rather than crashing
   }
 
+  // P2+P3: Generate assist cards (profile lookups + web search intents)
+  const assists = await generateAssists(effectiveMe, effectiveOthers, profile, env);
+
   return {
     talkBalance: { mePercent, othersPercent },
     openItems: Array.isArray(parsed.openItems) ? parsed.openItems.slice(0, 4) : [],
     suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions.slice(0, 3) : [],
     alignment: typeof parsed.alignment === 'string' ? parsed.alignment : '',
     corrections,
+    assists,
   };
 }

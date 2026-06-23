@@ -7,6 +7,7 @@ const CHUNK_MS = 2500;
 const MAX_RECONNECTS = 5;
 const COACH_INTERVAL_MS = 25000; // poll coaching every 25s
 const COACH_MIN_SEGMENTS = 3;    // don't call coach until at least this many segments
+const ASSIST_DEDUP_KEY = (card) => `${card.type}:${card.label}:${card.value}`;
 
 // Language hint sent alongside each mode
 const MODE_LANG = { english: 'en', 'hindi-urdu': 'hi', auto: null };
@@ -39,6 +40,8 @@ export default function SessionPage() {
   const [meLines, setMeLines] = useState([]);
   const [othersLines, setOthersLines] = useState([]);
   const [coaching, setCoaching] = useState(null);
+  const [assistCards, setAssistCards] = useState([]);
+  const [copiedAssist, setCopiedAssist] = useState(null); // key of card being copied
   const [error, setError] = useState('');
   const [wsConnected, setWsConnected] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -56,6 +59,8 @@ export default function SessionPage() {
   const meLinesRef = useRef([]);     // mirrors meLines for use in coaching interval
   const othersLinesRef = useRef([]); // mirrors othersLines
   const objectiveRef = useRef('');   // mirrors objective
+  const profileRef = useRef(null);   // operator profile for assist detection
+  const seenAssistKeys = useRef(new Set()); // dedup across polls
 
   // Keep transcript refs in sync
   useEffect(() => { meLinesRef.current = meLines; }, [meLines]);
@@ -89,6 +94,14 @@ export default function SessionPage() {
       .catch(() => setDeepgramAvailable(false));
   }, []);
 
+  // On mount: fetch operator profile for assist detection
+  useEffect(() => {
+    fetch('/api/profile')
+      .then(r => r.json())
+      .then(d => { if (d.profile) profileRef.current = d.profile; })
+      .catch(() => {});
+  }, []);
+
   // Keep URL in sync if sessionCode changes
   useEffect(() => {
     if (!sessionCode) return;
@@ -111,7 +124,12 @@ export default function SessionPage() {
         const res = await fetch(`${ENGINE_URL}/coach`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ me, others, objective: objectiveRef.current }),
+          body: JSON.stringify({
+            me,
+            others,
+            objective: objectiveRef.current,
+            profile: profileRef.current,
+          }),
         });
         const data = await res.json();
         if (data.ok) {
@@ -139,6 +157,18 @@ export default function SessionPage() {
               }
               return updated;
             });
+          }
+          // Accumulate new assist cards (deduplicate across polls)
+          if (data.assists && data.assists.length > 0) {
+            const fresh = data.assists.filter(card => {
+              const key = ASSIST_DEDUP_KEY(card);
+              if (seenAssistKeys.current.has(key)) return false;
+              seenAssistKeys.current.add(key);
+              return true;
+            });
+            if (fresh.length > 0) {
+              setAssistCards(prev => [...prev, ...fresh]);
+            }
           }
           setCoaching({ ...data, updatedAt: new Date().toLocaleTimeString() });
         }
@@ -174,6 +204,8 @@ export default function SessionPage() {
     setMeLines([]);
     setOthersLines([]);
     setCoaching(null);
+    setAssistCards([]);
+    seenAssistKeys.current = new Set();
 
     // Create a meeting record in the DB
     try {
@@ -389,6 +421,16 @@ export default function SessionPage() {
       setTimeout(() => setCopied(false), 2000);
     }).catch(() => {});
   }, [sessionCode]);
+
+  const copyAssistCard = useCallback((card) => {
+    const key = ASSIST_DEDUP_KEY(card);
+    const textToCopy = card.value || card.query || '';
+    if (!textToCopy) return;
+    navigator.clipboard.writeText(textToCopy).then(() => {
+      setCopiedAssist(key);
+      setTimeout(() => setCopiedAssist(null), 2000);
+    }).catch(() => {});
+  }, []);
 
   const isLive = status === 'live';
   const isConnecting = status === 'connecting';
@@ -672,6 +714,104 @@ export default function SessionPage() {
           </div>
         )}
 
+        {/* Assist panel — visible during and after live session when cards exist */}
+        {(isLive || status === 'stopped') && (
+          <div style={styles.assistPanel}>
+            <div style={styles.assistHeader}>
+              <span style={styles.assistTitle}>Live Assist</span>
+              <span style={styles.assistCount}>
+                {assistCards.length > 0
+                  ? `${assistCards.length} card${assistCards.length !== 1 ? 's' : ''}`
+                  : 'Waiting for references…'}
+              </span>
+              {assistCards.length > 0 && (
+                <button
+                  style={styles.clearBtn}
+                  onClick={() => { setAssistCards([]); seenAssistKeys.current = new Set(); }}
+                >
+                  Clear all
+                </button>
+              )}
+              <a href="/profile" style={styles.profileLink}>Edit profile</a>
+            </div>
+
+            {assistCards.length === 0 && (
+              <div style={{ padding: '12px 16px', color: '#9aa0a6', fontSize: 13 }}>
+                Cards appear when you reference your profile (website, email, phone) or signal a web search
+                ("let me google…"). They accumulate here for one-tap copy.
+              </div>
+            )}
+
+            {assistCards.length > 0 && (
+              <div style={styles.assistGrid}>
+                {assistCards.map((card, i) => {
+                  const key = ASSIST_DEDUP_KEY(card);
+                  const isCopied = copiedAssist === key;
+                  return (
+                    <div key={i} style={{
+                      ...styles.assistCard,
+                      borderColor: card.type === 'lookup' ? '#854d0e' : '#1e3a5f',
+                      background: card.type === 'lookup' ? '#1c1007' : '#0c1f33',
+                    }}>
+                      <div style={styles.assistCardTop}>
+                        <span style={{
+                          ...styles.assistTypeBadge,
+                          background: card.type === 'lookup' ? '#78350f' : '#1e3a5f',
+                          color: card.type === 'lookup' ? '#fde68a' : '#93c5fd',
+                        }}>
+                          {card.type === 'lookup' ? 'search' : 'my info'}
+                        </span>
+                        <span style={styles.assistLabel}>{card.label}</span>
+                      </div>
+
+                      {card.missing ? (
+                        <div style={styles.assistMissing}>
+                          Not in your profile yet —{' '}
+                          <a href="/profile" style={{ color: '#a78bfa', textDecoration: 'underline' }}>add it</a>
+                        </div>
+                      ) : (
+                        <>
+                          <div style={styles.assistValue}>{card.value}</div>
+                          {!card.missing && card.value && (
+                            <button
+                              style={{ ...styles.copyBtn, background: isCopied ? '#166534' : '#1a2740' }}
+                              onClick={() => copyAssistCard(card)}
+                            >
+                              {isCopied ? '✓ Copied' : 'Copy'}
+                            </button>
+                          )}
+                        </>
+                      )}
+
+                      {/* Lookup: show search results if available */}
+                      {card.type === 'lookup' && card.results && card.results.length > 0 && (
+                        <div style={styles.searchResults}>
+                          {card.results.map((r, ri) => (
+                            <div key={ri} style={styles.searchResult}>
+                              <a href={r.url} target="_blank" rel="noreferrer" style={styles.searchResultTitle}>
+                                {r.title}
+                              </a>
+                              {r.snippet && <div style={styles.searchResultSnippet}>{r.snippet}</div>}
+                              <button
+                                style={{ ...styles.copyBtn, marginTop: 4, fontSize: 10 }}
+                                onClick={() => {
+                                  navigator.clipboard.writeText(r.url).catch(() => {});
+                                }}
+                              >
+                                Copy link
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         <div style={styles.foot}>
           Engine: {ENGINE_URL}&nbsp;&middot;&nbsp;
           WS:&nbsp;
@@ -931,4 +1071,64 @@ const styles = {
     lineHeight: 1.5,
   },
   foot: { fontSize: 11, color: '#9aa0a6', textAlign: 'center' },
+  // Assist panel
+  assistPanel: {
+    background: '#0d1117',
+    border: '1px solid #854d0e',
+    borderRadius: 12,
+  },
+  assistHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    padding: '10px 16px',
+    borderBottom: '1px solid #292116',
+    flexWrap: 'wrap',
+  },
+  assistTitle: { fontSize: 13, fontWeight: 600, color: '#fbbf24' },
+  assistCount: { fontSize: 11, color: '#6b7280' },
+  clearBtn: {
+    border: '1px solid #374151', borderRadius: 5, background: '#1f2937',
+    color: '#9aa0a6', padding: '3px 9px', fontSize: 11, cursor: 'pointer',
+  },
+  profileLink: {
+    fontSize: 11, color: '#a78bfa', textDecoration: 'none', marginLeft: 'auto',
+  },
+  assistGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+    gap: 12,
+    padding: 14,
+  },
+  assistCard: {
+    border: '1px solid',
+    borderRadius: 10,
+    padding: 12,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
+  },
+  assistCardTop: { display: 'flex', alignItems: 'center', gap: 8 },
+  assistTypeBadge: {
+    fontSize: 9, fontWeight: 700, borderRadius: 4,
+    padding: '2px 6px', textTransform: 'uppercase', letterSpacing: '0.04em', flexShrink: 0,
+  },
+  assistLabel: { fontSize: 12, fontWeight: 600, color: '#e6e8eb' },
+  assistValue: {
+    fontSize: 13, color: '#d1d5db', wordBreak: 'break-all',
+    background: '#161b22', borderRadius: 6, padding: '6px 10px',
+    fontFamily: 'monospace',
+  },
+  assistMissing: { fontSize: 12, color: '#9aa0a6', fontStyle: 'italic' },
+  copyBtn: {
+    border: 'none', borderRadius: 6, padding: '5px 12px',
+    fontSize: 11, fontWeight: 600, color: '#fff', cursor: 'pointer', alignSelf: 'flex-start',
+  },
+  searchResults: { display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 },
+  searchResult: {
+    background: '#0d1117', border: '1px solid #21262d',
+    borderRadius: 6, padding: '8px 10px',
+  },
+  searchResultTitle: { fontSize: 12, color: '#58a6ff', textDecoration: 'none', display: 'block', marginBottom: 2 },
+  searchResultSnippet: { fontSize: 11, color: '#8b949e', lineHeight: 1.4 },
 };

@@ -20,6 +20,20 @@ try {
   // P1/P2: repeat-back repair columns (idempotent — ADD COLUMN IF NOT EXISTS)
   await sql`ALTER TABLE transcript_segments ADD COLUMN IF NOT EXISTS corrected_text text`;
   await sql`ALTER TABLE transcript_segments ADD COLUMN IF NOT EXISTS clarified_by_me boolean DEFAULT false`;
+  // Session 6 P1: operator profile — businesses, contact, common share items
+  await sql`CREATE TABLE IF NOT EXISTS user_profiles (
+    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_email    text UNIQUE NOT NULL,
+    businesses    jsonb NOT NULL DEFAULT '[]'::jsonb,
+    postal_address text,
+    phone         text,
+    emails        jsonb NOT NULL DEFAULT '[]'::jsonb,
+    social_links  jsonb NOT NULL DEFAULT '[]'::jsonb,
+    bio           text,
+    common_items  jsonb NOT NULL DEFAULT '[]'::jsonb,
+    updated_at    timestamptz NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_user_profiles_email ON user_profiles (user_email)`;
   console.log('[migrate] ok');
 } catch (e) {
   console.error('[migrate] failed:', e.message);

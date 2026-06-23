@@ -18,6 +18,9 @@ export default async function Home() {
         <a href="/meetings" style={{ display: 'inline-block', padding: '10px 20px', background: '#1e293b', color: '#38bdf8', borderRadius: '8px', textDecoration: 'none', fontWeight: 600, fontSize: '14px', border: '1px solid #2a3f55' }}>
           Past Meetings
         </a>
+        <a href="/profile" style={{ display: 'inline-block', padding: '10px 20px', background: '#1e293b', color: '#a78bfa', borderRadius: '8px', textDecoration: 'none', fontWeight: 600, fontSize: '14px', border: '1px solid #3b2f6e' }}>
+          My Profile
+        </a>
       </div>
       <LogoutButton />
     </main>
