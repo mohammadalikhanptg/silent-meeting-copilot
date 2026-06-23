@@ -1,13 +1,237 @@
 # Silent Meeting Copilot — Overnight Build Progress
 
-**Date:** 2026-06-23 (Session 6 updates in bold)
-**Session:** Autonomous overnight build × 6
+**Date:** 2026-06-23 (Session 7 updates in bold)
+**Session:** Autonomous overnight build × 7
 
 ---
 
 ## Summary
 
-All tasks (P1–P4) across all sessions are complete at maximum completable state on this Mac. Session 6 delivers Live Assist — a background track that surfaces copy-paste-ready information mid-meeting: the operator's own profile facts and on-demand web search cards.
+All tasks (P1–P5) across all sessions are complete at maximum completable state on this Mac. Session 7 delivers the Follow-up Tracker — operator flags transcript lines mid-meeting; each flagged point is enriched by a separate background pipeline (1–5 min latency) with an LLM talking point + online references, so when the operator's turn comes they are fully prepared.
+
+---
+
+## **Session 7 — Follow-up Tracker ✅ COMPLETE**
+
+### **P0 — Stabilisation**
+
+- `npm run build` passed before any changes ✅
+- Engine `/health` returns `{"ok":true}` ✅
+- Site root still redirects to `/login` ✅
+
+### **P1 — Timestamps + Flag control**
+
+Timestamps were already present on every transcript segment (`l.ts`) from Session 4. Session 7 adds:
+
+**Flag button (⚐/⚑)**: appears on every ME and OTHERS line while a session is live and a meeting row exists. Clicking the unflagged ⚐ flags the line:
+- The button turns amber ⚑ (immediate, optimistic)
+- The transcript line is not modified — flag state is a separate field on the line object
+- Flag persists in the `flagged_items` DB table
+
+#### Schema (appended to `scripts/migrate.mjs`)
+
+```sql
+-- P4: per-meeting context notes
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS context_notes text;
+
+-- P1: flagged items table
+CREATE TABLE IF NOT EXISTS flagged_items (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  meeting_id     uuid NOT NULL REFERENCES meetings(id),
+  source_segment uuid REFERENCES transcript_segments(id),
+  speaker        text NOT NULL,
+  text           text NOT NULL,
+  ts             timestamptz NOT NULL DEFAULT now(),
+  status         text NOT NULL DEFAULT 'pending',
+  assist_text    text,
+  reference_json jsonb,
+  addressed_at   timestamptz
+);
+CREATE INDEX IF NOT EXISTS idx_flagged_meeting ON flagged_items (meeting_id, ts);
+```
+
+Both idempotent. Applied on deploy.
+
+### **P2 — Two new panels BELOW existing live blocks**
+
+Both panels appear once at least one item has been flagged. They sit below Coaching → Assist → **Follow-up Tracker** in the page stack.
+
+**Left "Talking Points" panel** (green-accented):
+- Each flagged item as a numbered card
+- Quoted text + speaker + timestamp
+- Status indicator: "Queued…" / "Generating talking point…" / LLM result
+- "Mark addressed" button (struck-through opacity when addressed; reversible)
+
+**Right "References" panel** (blue-accented):
+- Aligned to SAME item number as Talking Points (same grid, same numbered cards)
+- When enriched: list of search results (title, URL, one-line snippet)
+- When no results: "Search Google" link generated from the flagged text
+- While processing: "Looking up references…" indicator
+
+Both panels are mobile-responsive (stack to 1 column ≤760px, `.smc-followup` breakpoint).
+
+### **P3 — Secondary NON-BLOCKING pipeline**
+
+The secondary pipeline is completely separated from the real-time transcription/coaching stream:
+
+```
+[Operator clicks ⚐]
+        │
+        ├── Immediate: POST /api/flagged-items → {id}   (10-50ms, never delays transcript)
+        │
+        ├── Immediate: update line.flagged = true in UI state
+        │
+        └── Fire-and-forget: POST /api/flagged-items/[id]/process
+                │             (client does NOT await this)
+                │
+                └── Next.js serverless route (maxDuration=60):
+                      1. Sets status = 'processing' in DB
+                      2. Calls POST ENGINE/enrich-flag (Cloudflare Worker)
+                      3. Worker: LLM prompt → suggested response + profile relevance
+                      4. Worker: optional Brave Search (if SEARCH_API_KEY set)
+                      5. Writes assist_text + reference_json to DB
+                      6. Sets status = 'enriched'
+
+[UI polls GET /api/flagged-items?meetingId=X every 30s]
+        │
+        └── Merges DB state into local flaggedItems array
+              → Talking Points and References panels fill in as results arrive
+              → Per-item "working" spinner while status is pending/processing
+```
+
+The real-time transcript, coaching (25s poll), and assist panels are never touched by this pipeline. Latency 1–5 minutes is by design.
+
+**Worker endpoint `POST /enrich-flag`:**
+
+Input:
+```json
+{
+  "text": "we're thinking of switching our fleet to Tesla",
+  "speaker": "others",
+  "context": "Meeting context / agenda text",
+  "profile": { "businesses": [...], "bio": "...", ... }
+}
+```
+
+Output:
+```json
+{
+  "ok": true,
+  "assist_text": "Can you elaborate on the specific models you're considering and how they align with current fleet needs? What factors are driving this decision?\n\nRelevant to you: Pacific Technology Group (pacific.london) — your advisory practice is well-positioned to address fleet strategy.",
+  "references": [
+    {"title": "Tesla Fleet Solutions", "url": "https://...", "snippet": "Tesla offers..."}
+  ]
+}
+```
+
+**Workers AI response type bug (fixed):** `env.AI.run()` returns `llmResult.response` as a parsed JavaScript object (not a string) when the LLM produces JSON output. Fixed by detecting `typeof rawResponse === 'object'` and using it directly, rather than calling `.trim()` on it which threw a TypeError.
+
+### **P4 — Per-meeting context**
+
+New **"Meeting context / agenda"** textarea on the session page, shown below the objective input (before session starts):
+- Freetext up to 1,000 chars
+- Saved to `meetings.context_notes` in the `POST /api/meetings` call at session start
+- Passed to the worker in the `/enrich-flag` body for each flagged item
+- Shown in the meeting review page (`/meetings/[id]`) below the objective
+- Example: "Quarterly review with client X. They are evaluating switching fleet to EV. We offer EV fleet advisory."
+
+### **P5 — Tests**
+
+```bash
+node scripts/test-followup.mjs
+
+Test 1: "switching fleet to Tesla" → talking point generated
+  ✅ response ok
+  ✅ assist_text is a string
+  ✅ assist_text has content (len=201)
+  ✅ references is an array
+  assist_text preview: "Can you provide more details on the reasons behind this switch, particularly in…"
+
+Test 2: second flag item with no profile → still returns assist_text
+  ✅ response ok
+  ✅ assist_text present
+  ✅ references is array (may be empty without search key)
+
+Test 3: ME line flagged → talking point references profile where relevant
+  ✅ response ok
+  ✅ assist_text has content for ME line
+  ✅ assist_text is contextually relevant to the flagged line
+
+Test 4: empty profile → no fabricated facts in assist_text
+  ✅ response ok
+  ✅ assist_text has no "undefined" values
+  ✅ assist_text has no serialisation errors
+
+Test 5: /health still responds correctly after worker update
+  ✅ /health ok:true
+  ✅ /health has deepgramAvailable field
+
+──────────────────────────────────────────────────────
+Results: 15 passed, 0 failed
+All tests passed ✅
+```
+
+**Build and deployment:**
+- `npm run build` passes ✅
+- `git push origin main` → commit `2f4f4f4` ✅
+- Worker deployed: version `7059873b-5462-45af-a1c4-32e97ad6cd17` ✅
+- Vercel: READY ✅
+
+### **Files changed (Session 7)**
+
+| File | Change |
+|------|--------|
+| `scripts/migrate.mjs` | Appended `context_notes` column + `flagged_items` table + index (idempotent) |
+| `app/api/flagged-items/route.js` | New — GET (list by meetingId) + POST (create flagged item) |
+| `app/api/flagged-items/[itemId]/route.js` | New — PATCH (mark addressed / un-addressed) |
+| `app/api/flagged-items/[itemId]/process/route.js` | New — POST (trigger background enrichment, maxDuration=60) |
+| `app/api/meetings/route.js` | Accept `context_notes` in POST body |
+| `app/session/page.js` | Context notes textarea, flag buttons on all lines, flaggedItems state + 30s poll, Follow-up Tracker two-panel section |
+| `app/meetings/[id]/page.js` | Show context_notes, show flagged items with talking points + references |
+| `worker/src/session-do.js` | `enrichFlaggedItem()` export (LLM enrichment + Brave Search) |
+| `worker/src/index.js` | `POST /enrich-flag` endpoint |
+| `scripts/test-followup.mjs` | New — 5 test cases, 15 assertions, all pass |
+
+### **Secondary pipeline design**
+
+The pipeline is designed for 1–5 minute latency and complete isolation from the real-time stream:
+
+```
+Real-time path (never touched):
+  MediaRecorder → WebSocket → Worker SessionDO → broadcast → UI render
+
+Coaching path (25s poll, independent):
+  POST ENGINE/coach → generateCoaching() → UI coaching panel
+
+Secondary enrichment path (fire-and-forget):
+  click ⚐ → POST /api/flagged-items → POST /api/flagged-items/[id]/process
+              → POST ENGINE/enrich-flag → DB write → 30s UI poll → panel fill
+```
+
+Three completely separate async paths. The real-time path has no knowledge of the secondary path.
+
+### **Search key dependency**
+
+References (right panel) require `SEARCH_API_KEY` (Brave Search) to be set on the worker:
+
+```bash
+cd ~/claude-workspace/silent-meeting-copilot/worker
+wrangler secret put SEARCH_API_KEY
+```
+
+Without the key:
+- The right panel shows a "Search Google" link instead of real results
+- The link is generated from the flagged text and always usable for manual lookup
+- Talking points (left panel) still work — they don't depend on the search key
+
+### **Recommended next steps**
+
+1. **Test with a real meeting**: start `/session`, fill in "Meeting context", say something as OTHERS (simulate via helper), click ⚐ on the line, watch the Follow-up Tracker panels fill in within 1–5 minutes
+2. **Enable Brave Search** to get real references: `wrangler secret put SEARCH_API_KEY` (free at https://brave.com/search/api/)
+3. **Add context notes to your next session** — the richer the context, the better the LLM can tailor the talking point to your specific situation
+4. **Mark items addressed** as you work through them; the panels stay visible but dim at 45% opacity so you can track what's left
+
+---
 
 ---
 
