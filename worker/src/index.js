@@ -22,14 +22,15 @@ export default {
 
     if (request.method === 'OPTIONS') return cors(null, 204);
 
-    // Health check — reports active provider
+    // Health check — reports active provider and whether Deepgram key is configured
     if (url.pathname === '/health') {
-      const provider = env.DEEPGRAM_API_KEY ? 'deepgram' : 'cloudflare';
-      return json({ ok: true, ts: Date.now(), provider });
+      const deepgramAvailable = !!env.DEEPGRAM_API_KEY;
+      const provider = deepgramAvailable ? 'deepgram' : 'cloudflare';
+      return json({ ok: true, ts: Date.now(), provider, deepgramAvailable });
     }
 
     // POST /transcribe — one-shot audio transcription for testing
-    // Optional query params: ?lang=hi (language hint), otherwise auto-detect
+    // Query params: ?lang=hi (language hint), ?mode=english|hindi-urdu|auto
     if (url.pathname === '/transcribe' && request.method === 'POST') {
       try {
         const buf = await request.arrayBuffer();
@@ -38,7 +39,8 @@ export default {
         }
         const audioBytes = new Uint8Array(buf);
         const lang = url.searchParams.get('lang') || null;
-        const result = await transcribeAndClean(audioBytes, env, lang);
+        const mode = url.searchParams.get('mode') || 'auto';
+        const result = await transcribeAndClean(audioBytes, env, lang, mode);
         return json({ ok: true, ...result });
       } catch (err) {
         console.error('Transcribe error:', err);
@@ -47,7 +49,7 @@ export default {
     }
 
     // GET /session/:id/ws — WebSocket upgrade routed to Durable Object
-    // Optional query params: ?lang=hi (language hint for this session)
+    // Query params: ?lang=hi&mode=hindi-urdu (both forwarded to the DO)
     const wsMatch = url.pathname.match(/^\/session\/([^/]+)\/ws$/);
     if (wsMatch) {
       if (request.headers.get('Upgrade') !== 'websocket') {

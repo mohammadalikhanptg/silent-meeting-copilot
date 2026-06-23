@@ -6,6 +6,12 @@ const ENGINE_URL = process.env.NEXT_PUBLIC_ENGINE_URL || 'https://smc-engine.ali
 const CHUNK_MS = 2500;
 const MAX_RECONNECTS = 5;
 
+// Language hint sent alongside each mode
+const MODE_LANG = { english: 'en', 'hindi-urdu': 'hi', auto: null };
+
+// Display labels for mode badges
+const MODE_LABEL = { english: 'English (fast)', 'hindi-urdu': 'Hindi / Urdu', auto: 'Auto-detect' };
+
 // Short human-readable code: 3 letters + 4 digits, e.g. "drk-8421"
 function generateShortCode() {
   const chars = 'abcdefghjkmnpqrstuvwxyz';
@@ -25,13 +31,14 @@ function encodeChunk(speaker, audioBuffer) {
 export default function SessionPage() {
   // Session code starts empty to avoid SSR hydration mismatch; set in useEffect
   const [sessionCode, setSessionCode] = useState('');
-  const [lang, setLang] = useState('');
+  const [mode, setMode] = useState('english'); // 'english' | 'hindi-urdu' | 'auto'
   const [status, setStatus] = useState('idle'); // idle | connecting | live | error | stopped
   const [meLines, setMeLines] = useState([]);
   const [othersLines, setOthersLines] = useState([]);
   const [error, setError] = useState('');
   const [wsConnected, setWsConnected] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [deepgramAvailable, setDeepgramAvailable] = useState(null); // null=checking, true/false
 
   // Mutable refs — stable across renders, safe to use inside WS callbacks
   const wsRef = useRef(null);
@@ -61,6 +68,14 @@ export default function SessionPage() {
     }
   }, []);
 
+  // On mount: check whether the engine has Deepgram configured
+  useEffect(() => {
+    fetch(`${ENGINE_URL}/health`)
+      .then(r => r.json())
+      .then(d => setDeepgramAvailable(!!d.deepgramAvailable))
+      .catch(() => setDeepgramAvailable(false)); // treat network error as unavailable
+  }, []);
+
   // Keep URL in sync if sessionCode changes
   useEffect(() => {
     if (!sessionCode) return;
@@ -79,6 +94,15 @@ export default function SessionPage() {
   const startSession = useCallback(async () => {
     if (!sessionCode) return;
 
+    // Block Hindi/Urdu when Deepgram key is not configured — never silently fall back
+    if (mode === 'hindi-urdu' && deepgramAvailable === false) {
+      setError(
+        'Hindi / Urdu mode is not available — the multilingual engine key has not been configured on this server. ' +
+        'Select English (fast) to continue, or contact the administrator to enable multilingual mode.'
+      );
+      return;
+    }
+
     intentionalStop.current = false;
     reconnectCount.current = 0;
     updateStatus('connecting');
@@ -86,17 +110,20 @@ export default function SessionPage() {
     setMeLines([]);
     setOthersLines([]);
 
-    // openWs is defined here so its closure captures sessionCode and lang at call time.
+    // openWs is defined here so its closure captures sessionCode and mode at call time.
     // Defined as a named function so it can call itself recursively for reconnect.
-    function openWs(code, langHint) {
+    function openWs(code, sessionMode) {
       return new Promise((resolve, reject) => {
         // Close any existing WS
         if (wsRef.current && wsRef.current.readyState < WebSocket.CLOSING) {
           try { wsRef.current.close(); } catch (_) {}
         }
 
-        const qs = langHint ? `?lang=${encodeURIComponent(langHint)}` : '';
-        const wsUrl = ENGINE_URL.replace(/^http/, 'ws') + `/session/${code}/ws${qs}`;
+        // Build query string: always include mode; add lang hint when known
+        const qs = new URLSearchParams({ mode: sessionMode });
+        const langHint = MODE_LANG[sessionMode];
+        if (langHint) qs.set('lang', langHint);
+        const wsUrl = ENGINE_URL.replace(/^http/, 'ws') + `/session/${code}/ws?${qs}`;
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
         let settled = false;
@@ -122,6 +149,12 @@ export default function SessionPage() {
                 } else {
                   setMeLines(p => [...p.slice(-200), line]);
                 }
+              } else if (msg.type === 'error' && msg.code === 'deepgram_unavailable') {
+                // Engine confirms Deepgram key is missing — show the real reason
+                setError(
+                  'Hindi / Urdu mode is not enabled on this server. ' +
+                  'Audio was received but not transcribed. Stop this session, switch to English mode, and try again.'
+                );
               }
             } catch (_) {}
           };
@@ -139,7 +172,7 @@ export default function SessionPage() {
             const delay = Math.min(1000 * Math.pow(2, n), 30000);
             setError(`Connection lost. Reconnecting in ${Math.round(delay / 1000)}s… (${reconnectCount.current}/${MAX_RECONNECTS})`);
             reconnectTimer.current = setTimeout(() => {
-              if (!intentionalStop.current) openWs(code, langHint).catch(() => {});
+              if (!intentionalStop.current) openWs(code, sessionMode).catch(() => {});
             }, delay);
           };
 
@@ -159,7 +192,7 @@ export default function SessionPage() {
     }
 
     try {
-      await openWs(sessionCode, lang);
+      await openWs(sessionCode, mode);
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true },
@@ -192,7 +225,7 @@ export default function SessionPage() {
       recorderRef.current = null;
       streamRef.current = null;
     }
-  }, [sessionCode, lang, updateStatus]);
+  }, [sessionCode, mode, deepgramAvailable, updateStatus]);
 
   const stopSession = useCallback(() => {
     intentionalStop.current = true;
@@ -221,7 +254,8 @@ export default function SessionPage() {
 
   const isLive = status === 'live';
   const isConnecting = status === 'connecting';
-  const canStart = !isLive && !isConnecting;
+  const deepgramBlocked = mode === 'hindi-urdu' && deepgramAvailable === false;
+  const canStart = !isLive && !isConnecting && !deepgramBlocked;
 
   return (
     <>
@@ -259,33 +293,50 @@ export default function SessionPage() {
 
           {/* Controls */}
           <div className="smc-controls" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <select
-              value={lang}
-              onChange={e => setLang(e.target.value)}
-              style={styles.select}
-              disabled={isLive || isConnecting}
-              title="Language hint for transcription"
-            >
-              <option value="">Auto-detect language</option>
-              <option value="en">English</option>
-              <option value="hi">Hindi / हिन्दी</option>
-              <option value="ur">Urdu / اردو</option>
-              <option value="es">Spanish</option>
-              <option value="fr">French</option>
-              <option value="de">German</option>
-              <option value="zh">Chinese</option>
-              <option value="ar">Arabic</option>
-            </select>
+
+            {/* Meeting language selector */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span style={styles.selectorLabel}>Meeting language</span>
+              <select
+                value={mode}
+                onChange={e => setMode(e.target.value)}
+                style={{
+                  ...styles.select,
+                  borderColor: deepgramBlocked ? '#92400e' : '#2a2f37',
+                }}
+                disabled={isLive || isConnecting}
+                title="Select the language for this meeting"
+              >
+                <option value="english">English (fast)</option>
+                <option value="hindi-urdu">Hindi / Urdu (multilingual)</option>
+                <option value="auto">Auto-detect</option>
+              </select>
+            </div>
+
+            {/* Status dot + label */}
             <span style={{ ...styles.dot, background: isLive ? '#22c55e' : isConnecting ? '#facc15' : '#6b7280' }} />
             <span style={styles.statusText}>
-              {isLive ? 'Live' : isConnecting ? 'Connecting…' : status === 'stopped' ? 'Stopped' : 'Ready'}
+              {isLive
+                ? `Live — ${MODE_LABEL[mode] || mode}`
+                : isConnecting
+                ? 'Connecting…'
+                : status === 'stopped'
+                ? 'Stopped'
+                : 'Ready'}
             </span>
+
             {canStart && (
               <button
                 onClick={startSession}
                 style={{ ...styles.btn, background: '#2AB49F', minWidth: 120 }}
                 disabled={!sessionCode}
               >
+                Start Session
+              </button>
+            )}
+            {/* Show Start disabled with reason when blocked */}
+            {deepgramBlocked && !isLive && !isConnecting && (
+              <button style={{ ...styles.btn, background: '#4b5563', minWidth: 120, cursor: 'not-allowed' }} disabled>
                 Start Session
               </button>
             )}
@@ -296,6 +347,22 @@ export default function SessionPage() {
             )}
           </div>
         </div>
+
+        {/* Deepgram unavailable warning — shown when Hindi/Urdu selected but key not configured */}
+        {deepgramBlocked && (
+          <div style={styles.warnBox}>
+            <strong>Hindi / Urdu mode is not currently enabled.</strong> The multilingual engine key has not been
+            configured on this server. Sessions cannot start in this mode. Switch to{' '}
+            <strong>English (fast)</strong> to continue, or contact the administrator to enable multilingual mode.
+          </div>
+        )}
+
+        {/* Deepgram availability checking notice */}
+        {mode === 'hindi-urdu' && deepgramAvailable === null && (
+          <div style={{ ...styles.warnBox, borderColor: '#1e3a5f', background: '#0c1f33', color: '#93c5fd' }}>
+            Checking whether multilingual mode is available on this server…
+          </div>
+        )}
 
         {error && <div style={styles.errorBox}>{error}</div>}
 
@@ -344,6 +411,12 @@ export default function SessionPage() {
           <span style={{ color: wsConnected ? '#22c55e' : '#9aa0a6' }}>
             {wsConnected ? 'connected' : 'disconnected'}
           </span>
+          {isLive && (
+            <>
+              &nbsp;&middot;&nbsp;
+              <span style={{ color: '#2AB49F' }}>{MODE_LABEL[mode]}</span>
+            </>
+          )}
         </div>
       </div>
     </>
@@ -398,6 +471,7 @@ const styles = {
     cursor: 'pointer',
     whiteSpace: 'nowrap',
   },
+  selectorLabel: { fontSize: 10, color: '#9aa0a6', letterSpacing: '0.04em', textTransform: 'uppercase' },
   select: {
     background: '#1a1d24',
     border: '1px solid #2a2f37',
@@ -416,6 +490,14 @@ const styles = {
     fontWeight: 600,
     color: '#fff',
     cursor: 'pointer',
+  },
+  warnBox: {
+    background: '#1c1007',
+    border: '1px solid #92400e',
+    borderRadius: 8,
+    padding: '8px 12px',
+    fontSize: 13,
+    color: '#fcd34d',
   },
   errorBox: {
     background: '#2d1010',

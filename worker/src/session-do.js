@@ -9,6 +9,7 @@ export class SessionDO {
     this.buffers = { me: [], others: [] };
     this.FLUSH_BYTES = 64 * 1024; // flush after ~64 KB of audio per channel
     this.lang = null; // language hint set on WS connect or via config message
+    this.mode = 'auto'; // per-session provider mode: 'auto' | 'english' | 'hindi-urdu'
   }
 
   async fetch(request) {
@@ -19,10 +20,12 @@ export class SessionDO {
   }
 
   async _handleWebSocket(request) {
-    // Accept optional ?lang= hint from connecting client
+    // Accept optional ?lang= and ?mode= from connecting client
     const url = new URL(request.url);
     const lang = url.searchParams.get('lang') || null;
+    const mode = url.searchParams.get('mode') || 'auto';
     if (lang) this.lang = lang;
+    this.mode = mode;
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
@@ -41,6 +44,7 @@ export class SessionDO {
           await this._flushChannel(ctrl.speaker || 'me');
         } else if (ctrl.type === 'config') {
           if (ctrl.lang !== undefined) this.lang = ctrl.lang || null;
+          if (ctrl.mode !== undefined) this.mode = ctrl.mode || 'auto';
         }
         return;
       }
@@ -89,8 +93,17 @@ export class SessionDO {
       offset += chunk.length;
     }
 
-    const result = await transcribeAndClean(combined, this.env, this.lang);
-    if (result.raw) {
+    const result = await transcribeAndClean(combined, this.env, this.lang, this.mode);
+    if (result.error === 'deepgram_unavailable') {
+      // Notify client explicitly — do NOT silently fall back to English
+      this._broadcast({
+        type: 'error',
+        code: 'deepgram_unavailable',
+        message:
+          'Hindi/Urdu mode requires a Deepgram API key that has not been configured on this server. ' +
+          'Please switch to English mode or contact the administrator.',
+      });
+    } else if (result.raw) {
       this._broadcast({ type: 'transcript', speaker, ...result });
     }
   }
@@ -104,8 +117,7 @@ export class SessionDO {
 }
 
 // Deepgram prerecorded REST transcription (nova-2, multilingual including Hindi/Urdu).
-// Only called when env.DEEPGRAM_API_KEY is set.
-// To enable: wrangler secret put DEEPGRAM_API_KEY  (then enter your key)
+// Only called when env.DEEPGRAM_API_KEY is set and mode selects Deepgram.
 async function transcribeDeepgram(audioBytes, apiKey, lang) {
   const params = new URLSearchParams({ model: 'nova-2', smart_format: 'true' });
   if (lang) {
@@ -135,15 +147,31 @@ async function transcribeDeepgram(audioBytes, apiKey, lang) {
 
 // Shared transcription + cleanup used by both SessionDO and POST /transcribe.
 //
-// Provider selection (automatic):
-//   DEEPGRAM_API_KEY present in Worker env → Deepgram nova-2 (better multilingual, Hindi/Urdu)
-//   No key                                 → Cloudflare Workers AI Whisper (free, default)
+// Per-session mode selection:
+//   mode='english'    → always Cloudflare Whisper (free, fast, no key needed)
+//   mode='hindi-urdu' → Deepgram nova-2 if key set; returns {error:'deepgram_unavailable'} if absent
+//   mode='auto'       → Deepgram if key present, else Cloudflare (legacy behaviour)
 //
 // Confirmed working Cloudflare models (probed 2026-06-23):
 //   ASR: @cf/openai/whisper               (multilingual base, number-array input)
 //   LLM: @cf/meta/llama-3.2-3b-instruct   (llama-3.1 deprecated 2026-05-30)
-export async function transcribeAndClean(audioBytes, env, lang = null) {
-  const provider = env.DEEPGRAM_API_KEY ? 'deepgram' : 'cloudflare';
+export async function transcribeAndClean(audioBytes, env, lang = null, mode = 'auto') {
+  let provider;
+
+  if (mode === 'english') {
+    // Explicit English → always Cloudflare, regardless of key
+    provider = 'cloudflare';
+  } else if (mode === 'hindi-urdu') {
+    // Explicit Hindi/Urdu → Deepgram required; never silently fall back
+    if (!env.DEEPGRAM_API_KEY) {
+      return { raw: '', cleaned: '', provider: 'deepgram', error: 'deepgram_unavailable' };
+    }
+    provider = 'deepgram';
+  } else {
+    // auto: use Deepgram if key is configured, otherwise Cloudflare
+    provider = env.DEEPGRAM_API_KEY ? 'deepgram' : 'cloudflare';
+  }
+
   let raw = '';
 
   if (provider === 'deepgram') {
