@@ -3,6 +3,7 @@ import QRCode from 'qrcode';
 import { getSql } from '../../../lib/db';
 import {
   getPrePayload, generateTotpSecret, otpauthUri, verifyTotp,
+  encryptTotpSecret, decryptTotpSecret, isTotpEncrypted,
   sessionCookieValue, cookieOptions, SESSION_COOKIE, SESSION_MAXAGE, PRE_COOKIE,
   isAllowed,
 } from '../../../lib/auth';
@@ -19,21 +20,27 @@ export async function GET() {
   const sql = getSql();
   const rows = await sql`SELECT totp_secret, totp_verified_at FROM auth_users WHERE email = ${pre.email} LIMIT 1`;
   if (rows[0]?.totp_verified_at) return NextResponse.json({ stage: 'verify' });
-  let secret = rows[0]?.totp_secret;
-  if (!secret) {
-    secret = generateTotpSecret();
-    await sql`UPDATE auth_users SET totp_secret = ${secret} WHERE email = ${pre.email}`;
+
+  let storedSecret = rows[0]?.totp_secret;
+  if (!storedSecret) {
+    // Generate new secret and store encrypted
+    const plain = generateTotpSecret();
+    storedSecret = encryptTotpSecret(plain);
+    await sql`UPDATE auth_users SET totp_secret = ${storedSecret} WHERE email = ${pre.email}`;
   }
-  const uri = otpauthUri(pre.email, secret);
+
+  // Always return plaintext to the enrollment page (client needs to display it)
+  const plainSecret = isTotpEncrypted(storedSecret) ? decryptTotpSecret(storedSecret) : storedSecret;
+  const uri = otpauthUri(pre.email, plainSecret);
   const qr = await QRCode.toDataURL(uri);
-  return NextResponse.json({ stage: 'enroll', secret, qr });
+  return NextResponse.json({ stage: 'enroll', secret: plainSecret, qr });
 }
 
 export async function POST(req) {
   const pre = await getPrePayload();
   if (!pre) return NextResponse.json({ error: 'no_pre' }, { status: 401 });
 
-  // Re-check allowlist at session creation — covers email removed after link was sent
+  // Re-check allowlist at session creation
   if (!isAllowed(pre.email)) return NextResponse.json({ error: 'not_allowed' }, { status: 403 });
 
   let body;
@@ -43,7 +50,7 @@ export async function POST(req) {
 
   const sql = getSql();
 
-  // Lockout check: count recent failures per user within the window
+  // Lockout: count recent failures within window
   const windowStart = new Date(Date.now() - TOTP_LOCKOUT_MS);
   const lockoutKey = pre.email;
   const failures = await sql`
@@ -58,10 +65,11 @@ export async function POST(req) {
   }
 
   const rows = await sql`SELECT totp_secret FROM auth_users WHERE email = ${pre.email} LIMIT 1`;
-  const secret = rows[0]?.totp_secret;
-  if (!secret) return NextResponse.json({ error: 'no_secret' }, { status: 400 });
+  const storedSecret = rows[0]?.totp_secret;
+  if (!storedSecret) return NextResponse.json({ error: 'no_secret' }, { status: 400 });
 
-  if (!verifyTotp(secret, code)) {
+  // verifyTotp handles encrypted secrets internally
+  if (!verifyTotp(storedSecret, code)) {
     await sql`INSERT INTO auth_attempts (type, key, success, ip) VALUES ('totp', ${lockoutKey}, false, ${ip})`.catch(() => {});
     const nowFails = failCount + 1;
     const remaining = TOTP_FAIL_MAX - nowFails;

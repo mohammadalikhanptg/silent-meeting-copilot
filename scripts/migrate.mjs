@@ -1,4 +1,18 @@
 import { neon } from '@neondatabase/serverless';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+
+// Load .env.local for local builds (Vercel injects env vars automatically)
+const __dir = dirname(fileURLToPath(import.meta.url));
+try {
+  const lines = readFileSync(join(__dir, '..', '.env.local'), 'utf8').split('\n');
+  for (const line of lines) {
+    const m = line.replace(/\r/, '').match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
+  }
+} catch {}
 
 const url = process.env.DATABASE_URL;
 if (!url) {
@@ -81,6 +95,30 @@ try {
     created_at timestamptz NOT NULL DEFAULT now()
   )`;
   await sql`CREATE INDEX IF NOT EXISTS idx_auth_attempts_key ON auth_attempts (type, key, created_at)`;
+  // Auth hardening 4: encrypt existing plaintext TOTP secrets in place
+  const encKey = process.env.TOTP_ENC_KEY;
+  if (encKey) {
+    const keyBuf = Buffer.from(encKey, 'hex');
+    function encryptTotp(plain) {
+      const iv = randomBytes(12);
+      const cipher = createCipheriv('aes-256-gcm', keyBuf, iv);
+      const ct = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
+      const tag = cipher.getAuthTag();
+      return `v1:${iv.toString('hex')}:${ct.toString('hex')}:${tag.toString('hex')}`;
+    }
+    const users = await sql`SELECT email, totp_secret FROM auth_users WHERE totp_secret IS NOT NULL`;
+    let migrated = 0;
+    for (const user of users) {
+      if (!user.totp_secret.startsWith('v1:')) {
+        const encrypted = encryptTotp(user.totp_secret);
+        await sql`UPDATE auth_users SET totp_secret = ${encrypted} WHERE email = ${user.email} AND totp_secret = ${user.totp_secret}`;
+        migrated++;
+      }
+    }
+    if (migrated > 0) console.log(`[migrate] encrypted ${migrated} TOTP secret(s)`);
+  } else {
+    console.warn('[migrate] TOTP_ENC_KEY not set — skipping TOTP encryption migration');
+  }
   console.log('[migrate] ok');
 } catch (e) {
   // Permission denied = local env has a read-only DATABASE_URL.

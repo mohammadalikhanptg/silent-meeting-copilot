@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { cookies } from 'next/headers';
 import { getSql } from './db';
+import { verifySync, generateSync, generateSecret as otplibGenerateSecret } from 'otplib';
 
 export const SESSION_COOKIE = 'smc_session';
 export const PRE_COOKIE = 'smc_pre';
@@ -71,56 +72,65 @@ export function preCookieValue(email, stage) {
 }
 
 export function cookieOptions(maxAge) {
-  return { httpOnly: true, secure: true, sameSite: 'lax', path: '/', maxAge };
+  return { httpOnly: true, secure: true, sameSite: 'strict', path: '/', maxAge };
 }
 
-const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+// ── TOTP encryption ──────────────────────────────────────────────────────────
 
-export function generateTotpSecret(length = 20) {
-  const bytes = crypto.randomBytes(length);
-  let bits = '';
-  for (const byte of bytes) bits += byte.toString(2).padStart(8, '0');
-  let out = '';
-  for (let i = 0; i + 5 <= bits.length; i += 5) out += B32[parseInt(bits.slice(i, i + 5), 2)];
-  return out;
+function totpEncKey() {
+  const k = process.env.TOTP_ENC_KEY;
+  if (!k) throw new Error('TOTP_ENC_KEY not configured');
+  return Buffer.from(k, 'hex');
 }
 
-function base32Decode(s) {
-  const clean = s.replace(/=+$/, '').toUpperCase().replace(/\s/g, '');
-  let bits = '';
-  for (const c of clean) {
-    const idx = B32.indexOf(c);
-    if (idx === -1) continue;
-    bits += idx.toString(2).padStart(5, '0');
+export function isTotpEncrypted(s) {
+  return typeof s === 'string' && s.startsWith('v1:');
+}
+
+export function encryptTotpSecret(plain) {
+  const key = totpEncKey();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const ct = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `v1:${iv.toString('hex')}:${ct.toString('hex')}:${tag.toString('hex')}`;
+}
+
+export function decryptTotpSecret(encrypted) {
+  if (!encrypted) return null;
+  if (!isTotpEncrypted(encrypted)) return encrypted; // plaintext pass-through (pre-migration)
+  const parts = encrypted.split(':');
+  if (parts.length !== 4) return null;
+  const [, ivHex, ctHex, tagHex] = parts;
+  try {
+    const key = totpEncKey();
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivHex, 'hex'));
+    decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+    return decipher.update(Buffer.from(ctHex, 'hex')).toString('utf8') + decipher.final('utf8');
+  } catch {
+    return null;
   }
-  const bytes = [];
-  for (let i = 0; i + 8 <= bits.length; i += 8) bytes.push(parseInt(bits.slice(i, i + 8), 2));
-  return Buffer.from(bytes);
 }
 
-function hotp(secretBuf, counter) {
-  const buf = Buffer.alloc(8);
-  buf.writeBigUInt64BE(BigInt(counter));
-  const h = crypto.createHmac('sha1', secretBuf).update(buf).digest();
-  const offset = h[h.length - 1] & 0xf;
-  const code = ((h[offset] & 0x7f) << 24) | ((h[offset + 1] & 0xff) << 16) | ((h[offset + 2] & 0xff) << 8) | (h[offset + 3] & 0xff);
-  return (code % 1000000).toString().padStart(6, '0');
+// ── TOTP (otplib) ────────────────────────────────────────────────────────────
+
+export function generateTotpSecret() {
+  return otplibGenerateSecret();
 }
 
-export function verifyTotp(secretB32, token, window = 1) {
-  if (!secretB32 || !token) return false;
+export function verifyTotp(rawSecret, token, window = 1) {
+  if (!rawSecret || !token) return false;
   const t = String(token).replace(/\s/g, '');
   if (!/^[0-9]{6}$/.test(t)) return false;
-  const secretBuf = base32Decode(secretB32);
-  const step = 30;
-  const counter = Math.floor(Date.now() / 1000 / step);
-  for (let w = -window; w <= window; w++) {
-    const candidate = hotp(secretBuf, counter + w);
-    const a = Buffer.from(candidate);
-    const b = Buffer.from(t);
-    if (a.length === b.length && crypto.timingSafeEqual(a, b)) return true;
-  }
-  return false;
+  const plain = isTotpEncrypted(rawSecret) ? decryptTotpSecret(rawSecret) : rawSecret;
+  if (!plain) return false;
+  const result = verifySync({ secret: plain, token: t, epochTolerance: window });
+  return result?.valid === true;
+}
+
+export function generateTotpCode(rawSecret) {
+  const plain = isTotpEncrypted(rawSecret) ? decryptTotpSecret(rawSecret) : rawSecret;
+  return generateSync({ secret: plain });
 }
 
 export function otpauthUri(email, secretB32) {
@@ -129,11 +139,13 @@ export function otpauthUri(email, secretB32) {
   return `otpauth://totp/${label}?secret=${secretB32}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=6&period=30`;
 }
 
+// ── Session helpers ───────────────────────────────────────────────────────────
+
 export async function getSessionPayload() {
   const c = await cookies();
   const p = verifyToken(c.get(SESSION_COOKIE)?.value);
   if (!p || p.t !== 'session') return null;
-  if (!p.sid) return null; // all sessions have sid; missing sid = legacy invalid token
+  if (!p.sid) return null; // all sessions have sid; missing = legacy invalid token
 
   try {
     const sql = getSql();
@@ -142,12 +154,10 @@ export async function getSessionPayload() {
     `;
     if (!rows[0]) return null;
     const row = rows[0];
-    if (row.revoked_at) return null; // revoked — caller should deny access
+    if (row.revoked_at) return null;
     if (new Date(row.expires_at) < new Date()) return null;
-    // Update last_seen — fire-and-forget, never block the request
     sql`UPDATE sessions SET last_seen = now() WHERE id = ${p.sid}`.catch(() => {});
   } catch (e) {
-    // DB unavailable — fail closed (deny rather than bypass)
     console.error('[auth] session DB check failed:', e.message);
     return null;
   }

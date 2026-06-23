@@ -9,11 +9,12 @@
     "migrate": "node scripts/migrate.mjs"
   },
   "dependencies": {
-    "next": "latest",
-    "react": "latest",
-    "react-dom": "latest",
     "@neondatabase/serverless": "latest",
     "docx": "latest",
-    "qrcode": "latest"
+    "next": "latest",
+    "otplib": "^13.4.1",
+    "qrcode": "latest",
+    "react": "latest",
+    "react-dom": "latest"
   }
 }
