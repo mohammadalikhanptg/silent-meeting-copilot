@@ -10,6 +10,9 @@ const statusText = document.getElementById('statusText');
 const barMe = document.getElementById('barMe');
 const barOt = document.getElementById('barOt');
 const engineUrlEl = document.getElementById('engineUrl');
+const pairingKeyInput = document.getElementById('pairingKeyInput');
+const saveKeyBtn = document.getElementById('saveKeyBtn');
+const keySavedBadge = document.getElementById('keySavedBadge');
 
 const CHUNK_MS = 2500;
 
@@ -23,6 +26,7 @@ let analyserCtxOt = null;
 let rafId = null;
 let engineUrl = '';
 let sessionId = '';
+let pairingKey = ''; // loaded from safeStorage on init, sent as ?key= on WS connect
 
 // Short human-readable code matching the browser format: 3 letters + 4 digits
 function generateShortCode() {
@@ -61,8 +65,12 @@ function encodeFrame(speaker, arrayBuffer) {
 
 function openWebSocket() {
   return new Promise((resolve, reject) => {
-    const wsUrl = engineUrl.replace(/^http/, 'ws') + `/session/${sessionId}/ws`;
-    log(`Connecting WebSocket: ${wsUrl}`);
+    const qs = new URLSearchParams({ mode: 'auto' });
+    if (pairingKey) {
+      qs.set('key', pairingKey);
+    }
+    const wsUrl = engineUrl.replace(/^http/, 'ws') + `/session/${sessionId}/ws?${qs}`;
+    log(`Connecting WebSocket: ${wsUrl.replace(pairingKey, pairingKey ? '[key]' : '')}`);
     ws = new WebSocket(wsUrl);
     ws.binaryType = 'arraybuffer';
 
@@ -77,10 +85,16 @@ function openWebSocket() {
         if (msg.type === 'transcript' && msg.raw) {
           const speaker = msg.speaker === 'others' ? 'OTHERS' : 'ME';
           log(`[${speaker}] ${msg.cleaned || msg.raw}`);
+        } else if (msg.type === 'auth_error') {
+          log(`AUTH ERROR: ${msg.reason || 'invalid pairing key'}`);
+          log('Please check your pairing key in the settings above.');
+          setStatus('error');
         }
       } catch (_) {}
     };
-    ws.onclose = () => log('WebSocket closed.');
+    ws.onclose = (evt) => {
+      log(`WebSocket closed. ${evt.code === 4401 ? '(Auth failed — check pairing key)' : ''}`);
+    };
 
     setTimeout(() => reject(new Error('WebSocket timeout')), 10000);
   });
@@ -110,13 +124,18 @@ function setupMeter(stream, barEl) {
 }
 
 async function start() {
+  if (!pairingKey) {
+    log('WARNING: No pairing key set. Please paste your key from the profile page and click Save first.');
+    log('Connecting without a key — will only work if the server allows unauthenticated connections.');
+  }
+
   startBtn.disabled = true;
   setStatus('connecting');
 
   // Use the code from the input field, or generate a new one
   const inputVal = sessionInput.value.trim();
   sessionId = inputVal || generateShortCode();
-  sessionInput.value = sessionId; // display the active code
+  sessionInput.value = sessionId;
   sessionInput.disabled = true;
 
   log(`Session code: ${sessionId}`);
@@ -248,6 +267,22 @@ async function listDevices() {
   }
 }
 
+// Save pairing key handler
+saveKeyBtn.addEventListener('click', async () => {
+  const val = pairingKeyInput.value.trim();
+  if (!val) { log('Pairing key is empty — not saved.'); return; }
+  if (!val.startsWith('smc1_')) { log('WARNING: This does not look like a valid pairing key (should start with smc1_).'); }
+  pairingKey = val;
+  const result = await window.smc?.savePairingKey(val);
+  if (result?.ok !== false) {
+    keySavedBadge.style.display = 'inline';
+    log('Pairing key saved securely.');
+    setTimeout(() => { keySavedBadge.style.display = 'none'; }, 3000);
+  } else {
+    log('Failed to save pairing key: ' + (result?.error || 'unknown error'));
+  }
+});
+
 // Init
 (async () => {
   try {
@@ -257,6 +292,19 @@ async function listDevices() {
     log('SMC Helper started.');
     log('Engine: ' + engineUrl);
     log(`Electron ${window.smc.versions.electron} / Chromium ${window.smc.versions.chrome}`);
+
+    // Load saved pairing key
+    const keyResult = await window.smc.loadPairingKey();
+    if (keyResult?.key) {
+      pairingKey = keyResult.key;
+      pairingKeyInput.value = keyResult.key;
+      keySavedBadge.style.display = 'inline';
+      log('Pairing key loaded from secure storage.');
+      setTimeout(() => { keySavedBadge.style.display = 'none'; }, 2000);
+    } else {
+      log('No pairing key found. Get yours from Silent Meeting Copilot → Profile → Desktop helper.');
+    }
+
     log('Enter a session code above (from the browser page) then click Start.');
   } catch (err) {
     log('Config load error: ' + err);

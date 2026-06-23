@@ -5,11 +5,11 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' wss: ws:; connect-src *;" />
   <title>SMC Helper</title>
   <style>
-    :root { --bg:#0f1115;--panel:#171a21;--border:#2a2f37;--text:#e6e8eb;--muted:#9aa0a6;--green:#22c55e;--blue:#38bdf8;--red:#ef4444;--teal:#2AB49F; }
+    :root { --bg:#0f1115;--panel:#171a21;--border:#2a2f37;--text:#e6e8eb;--muted:#9aa0a6;--green:#22c55e;--blue:#38bdf8;--red:#ef4444;--teal:#2AB49F;--purple:#a78bfa; }
     * { box-sizing:border-box; margin:0; padding:0; }
     body { background:var(--bg); color:var(--text); font-family:"Segoe UI",system-ui,sans-serif; font-size:13px; }
-    .app { padding:16px; display:flex; flex-direction:column; gap:12px; height:100vh; }
-    h1 { font-size:16px; font-weight:600; }
+    .app { padding:16px; display:flex; flex-direction:column; gap:10px; height:100vh; }
+    h1 { font-size:15px; font-weight:600; }
     h1 small { display:block; font-size:10px; color:var(--muted); font-weight:400; margin-top:2px; }
     .row { display:flex; align-items:center; gap:10px; }
     .dot { width:9px;height:9px;border-radius:50%;background:#6b7280;flex-shrink:0; }
@@ -18,24 +18,46 @@
     button { border:none;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;color:#fff;cursor:pointer;background:var(--panel);border:1px solid var(--border); }
     button.primary { background:var(--teal);border-color:var(--teal); }
     button.danger { background:var(--red);border-color:var(--red); }
-    .meters { display:grid;grid-template-columns:1fr 1fr;gap:12px; }
+    button.save { background:#2a1a5a;border-color:#4b2a8a;color:var(--purple); }
+    .meters { display:grid;grid-template-columns:1fr 1fr;gap:10px; }
     .meter-block label { font-size:10px;color:var(--muted); }
-    .bar { height:10px;border-radius:5px;background:var(--panel);border:1px solid var(--border);margin-top:4px;overflow:hidden; }
+    .bar { height:8px;border-radius:5px;background:var(--panel);border:1px solid var(--border);margin-top:4px;overflow:hidden; }
     .bar span { display:block;height:100%;width:0;transition:width 80ms linear; }
     .bar.me span { background:var(--green); }
     .bar.ot span { background:var(--blue); }
-    .log { flex:1;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:8px;overflow-y:auto;font-size:11px;line-height:1.6;color:var(--muted);font-family:monospace;white-space:pre-wrap;min-height:80px; }
-    select,input[type=text] { background:var(--panel);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 8px;font-size:12px; }
-    input[type=text]::placeholder { color:var(--muted); }
-    input[type=text]:disabled { opacity:0.5; }
+    .log { flex:1;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:8px;overflow-y:auto;font-size:11px;line-height:1.6;color:var(--muted);font-family:monospace;white-space:pre-wrap;min-height:60px; }
+    select,input[type=text],input[type=password] { background:var(--panel);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 8px;font-size:12px; }
+    input[type=text]::placeholder,input[type=password]::placeholder { color:var(--muted); }
+    input[type=text]:disabled,input[type=password]:disabled { opacity:0.5; }
     .url { font-size:10px;color:var(--muted);word-break:break-all; }
     .code-hint { font-size:10px;color:var(--muted);margin-top:2px; }
+    .key-section { background:#0d0820;border:1px solid #2a1a4a;border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:6px; }
+    .key-label { font-size:10px;font-weight:600;color:var(--purple);letter-spacing:0.06em;text-transform:uppercase; }
+    .key-saved { font-size:10px;color:var(--green); }
   </style>
 </head>
 <body>
   <div class="app">
     <div class="row">
-      <h1>SMC Helper <small>Silent Meeting Copilot — Windows audio bridge</small></h1>
+      <h1>SMC Helper <small>Silent Meeting Copilot — desktop audio bridge</small></h1>
+    </div>
+
+    <!-- Pairing key -->
+    <div class="key-section">
+      <div class="key-label">Pairing key <span id="keySavedBadge" class="key-saved" style="display:none">✓ saved</span></div>
+      <div class="row">
+        <input
+          id="pairingKeyInput"
+          type="password"
+          placeholder="Paste your pairing key from the profile page…"
+          style="flex:1;font-family:monospace;letter-spacing:0.04em;"
+        />
+        <button class="save" id="saveKeyBtn">Save</button>
+      </div>
+      <div style="font-size:10px;color:#6b7280">
+        Get your key from <strong style="color:#a78bfa">Silent Meeting Copilot → Profile → Desktop helper</strong>.
+        The key is stored securely on this device and sent automatically when you start a session.
+      </div>
     </div>
 
     <div class="row">

@@ -192,3 +192,48 @@ export async function getPrePayload() {
   if (!p || p.t !== 'pre') return null;
   return p;
 }
+
+// ── Helper pairing key ────────────────────────────────────────────────────────
+
+function helperSigningSecret() {
+  const s = process.env.HELPER_SIGNING_SECRET;
+  if (!s) throw new Error('HELPER_SIGNING_SECRET not configured');
+  return s;
+}
+
+export function generateHelperKey(email, version) {
+  const payload = Buffer.from(JSON.stringify({ u: email, v: version })).toString('base64url');
+  const sig = crypto.createHmac('sha256', helperSigningSecret()).update(payload).digest('base64url');
+  return `smc1_${payload}.${sig}`;
+}
+
+export function decodeHelperKey(key) {
+  if (!key || typeof key !== 'string' || !key.startsWith('smc1_')) return null;
+  const rest = key.slice(5); // remove 'smc1_'
+  const dot = rest.lastIndexOf('.');
+  if (dot < 1) return null;
+  const payload = rest.slice(0, dot);
+  const sig = rest.slice(dot + 1);
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (!parsed.u || parsed.v === undefined) return null;
+    return { payload, sig, email: parsed.u, version: parsed.v };
+  } catch {
+    return null;
+  }
+}
+
+export function verifyHelperKeyHmac(key) {
+  const decoded = decodeHelperKey(key);
+  if (!decoded) return null;
+  const expected = crypto.createHmac('sha256', helperSigningSecret()).update(decoded.payload).digest('base64url');
+  const a = Buffer.from(decoded.sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return null;
+  try {
+    if (!crypto.timingSafeEqual(a, b)) return null;
+  } catch {
+    return null;
+  }
+  return decoded;
+}

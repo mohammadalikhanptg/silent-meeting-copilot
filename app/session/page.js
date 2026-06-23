@@ -508,6 +508,7 @@ export default function SessionPage() {
             objective: objective || null,
             language_mode: mode,
             context_notes: contextNotes || null,
+            session_code: sessionCode || null,
           }),
         });
         if (meetingRes.ok) {
@@ -519,7 +520,7 @@ export default function SessionPage() {
           history.replaceState({}, '', u);
         }
       } else {
-        // Update existing prepared meeting with current form values
+        // Update existing prepared meeting with current form values + session code
         await fetch(`/api/meetings/${mId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -527,6 +528,7 @@ export default function SessionPage() {
             title: title || `Session ${sessionCode}`,
             objective: objective || null,
             context_notes: contextNotes || null,
+            session_code: sessionCode || null,
           }),
         }).catch(() => {});
       }

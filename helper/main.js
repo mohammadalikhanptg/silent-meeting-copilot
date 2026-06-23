@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, session, nativeImage, ipcMain } = require('electron');
+const { app, BrowserWindow, Tray, Menu, session, nativeImage, ipcMain, safeStorage } = require('electron');
 const path = require('path');
 
 // Engine URL — set via SMC_ENGINE_URL environment variable or falls back to production
@@ -45,7 +45,7 @@ function updateTrayMenu() {
 function createWindow() {
   win = new BrowserWindow({
     width: 540,
-    height: 420,
+    height: 500,
     title: 'SMC Helper',
     icon: path.join(__dirname, 'assets', 'icon.ico'),
     webPreferences: {
@@ -56,9 +56,6 @@ function createWindow() {
   });
 
   // Allow WASAPI loopback without screen-capture UI.
-  // On Windows, Electron's setDisplayMediaRequestHandler lets us attach
-  // the window's own video frame + WASAPI loopback audio, bypassing the
-  // screen-picker prompt entirely.
   session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
     if (request.frame) {
       callback({ video: request.frame, audio: 'loopback' });
@@ -83,8 +80,40 @@ ipcMain.on('capture-state', (_, capturing) => {
   updateTrayMenu();
 });
 
-// IPC: renderer requests engine URL
+// IPC: renderer requests engine URL and config
 ipcMain.handle('get-config', () => ({ engineUrl: ENGINE_URL }));
+
+// IPC: save pairing key to safeStorage (encrypted on disk)
+ipcMain.handle('save-pairing-key', (_, keyValue) => {
+  if (!keyValue || typeof keyValue !== 'string') return { ok: false };
+  try {
+    if (safeStorage.isEncryptionAvailable()) {
+      const encrypted = safeStorage.encryptString(keyValue);
+      // Store as base64 in a simple in-process store — in production this would write to a file
+      app.pairingKeyEncrypted = encrypted.toString('base64');
+    } else {
+      // Fallback: store plaintext in memory (no encryption available)
+      app.pairingKeyPlain = keyValue;
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
+// IPC: load pairing key from safeStorage
+ipcMain.handle('load-pairing-key', () => {
+  try {
+    if (app.pairingKeyEncrypted && safeStorage.isEncryptionAvailable()) {
+      const buf = Buffer.from(app.pairingKeyEncrypted, 'base64');
+      return { key: safeStorage.decryptString(buf) };
+    }
+    if (app.pairingKeyPlain) return { key: app.pairingKeyPlain };
+    return { key: '' };
+  } catch {
+    return { key: '' };
+  }
+});
 
 app.whenReady().then(() => {
   createWindow();

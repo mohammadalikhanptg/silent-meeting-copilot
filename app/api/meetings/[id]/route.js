@@ -29,6 +29,9 @@ export async function PATCH(request, { params }) {
   if (body.context_notes !== undefined) {
     await sql`UPDATE meetings SET context_notes = ${body.context_notes || null} WHERE id = ${id} AND user_email = ${session.email}`;
   }
+  if (body.session_code !== undefined) {
+    await sql`UPDATE meetings SET session_code = ${body.session_code || null} WHERE id = ${id} AND user_email = ${session.email}`;
+  }
 
   return NextResponse.json({ ok: true });
 }

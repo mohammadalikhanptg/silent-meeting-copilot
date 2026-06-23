@@ -138,6 +138,11 @@ try {
   } else {
     console.warn('[migrate] TOTP_ENC_KEY not set — skipping TOTP encryption migration');
   }
+  // Session 14 P1: per-user helper pairing key versioning
+  await sql`ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS helper_key_version INT NOT NULL DEFAULT 1`;
+  // Session 14 P2: link session code to meeting for engine ownership validation
+  await sql`ALTER TABLE meetings ADD COLUMN IF NOT EXISTS session_code text`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_meetings_session_code ON meetings (session_code)`;
   console.log('[migrate] ok');
 } catch (e) {
   // Permission denied = local env has a read-only DATABASE_URL.

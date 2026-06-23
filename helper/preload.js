@@ -4,6 +4,8 @@ contextBridge.exposeInMainWorld('smc', {
   getConfig: () => ipcRenderer.invoke('get-config'),
   setCaptureState: (capturing) => ipcRenderer.send('capture-state', capturing),
   onToggleCapture: (cb) => ipcRenderer.on('toggle-capture', (_, val) => cb(val)),
+  savePairingKey: (key) => ipcRenderer.invoke('save-pairing-key', key),
+  loadPairingKey: () => ipcRenderer.invoke('load-pairing-key'),
   versions: {
     electron: process.versions.electron,
     chrome: process.versions.chrome,

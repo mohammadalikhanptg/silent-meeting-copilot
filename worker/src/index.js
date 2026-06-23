@@ -16,6 +16,34 @@ function json(obj, status = 200) {
   return cors(JSON.stringify(obj), status, { 'Content-Type': 'application/json' });
 }
 
+// Validate a helper pairing key by calling the Next.js internal endpoint.
+// Returns {valid: true, email} or {valid: false, reason}.
+async function validateHelperKey(key, sessionCode, env) {
+  const secret = env.HELPER_SIGNING_SECRET;
+  if (!secret) return { valid: false, reason: 'server misconfigured' };
+
+  const appUrl = env.APP_BASE_URL || 'https://silent-meeting-copilot.vercel.app';
+  const validateUrl = new URL(`${appUrl}/api/internal/validate-helper-key`);
+  validateUrl.searchParams.set('key', key);
+  if (sessionCode) validateUrl.searchParams.set('session_code', sessionCode);
+
+  try {
+    const res = await fetch(validateUrl.toString(), {
+      headers: { Authorization: `Bearer ${secret}` },
+      cf: { cacheTtl: 0 },
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      return { valid: false, reason: body.reason || 'validation failed' };
+    }
+    const data = await res.json();
+    return data;
+  } catch (err) {
+    console.error('validateHelperKey fetch error:', err);
+    return { valid: false, reason: 'validation service unreachable' };
+  }
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -92,13 +120,34 @@ export default {
     }
 
     // GET /session/:id/ws — WebSocket upgrade routed to Durable Object
-    // Query params: ?lang=hi&mode=hindi-urdu (both forwarded to the DO)
+    // Query params: ?lang=hi&mode=hindi-urdu&key=smc1_xxx.yyy (key required for helper connections)
     const wsMatch = url.pathname.match(/^\/session\/([^/]+)\/ws$/);
     if (wsMatch) {
       if (request.headers.get('Upgrade') !== 'websocket') {
         return json({ error: 'Expected WebSocket upgrade' }, 426);
       }
       const sessionId = wsMatch[1];
+      const pairingKey = url.searchParams.get('key');
+
+      // If a pairing key is presented, validate it before routing to the DO.
+      // Browser connections omit ?key= and are forwarded unchanged (existing behaviour).
+      // Helper connections MUST supply a valid key that owns this session.
+      if (pairingKey) {
+        const validationResult = await validateHelperKey(pairingKey, sessionId, env);
+        if (!validationResult.valid) {
+          const pair = new WebSocketPair();
+          const [client, server] = Object.values(pair);
+          server.accept();
+          server.send(JSON.stringify({ type: 'auth_error', reason: validationResult.reason || 'invalid key' }));
+          server.close(4401, validationResult.reason || 'invalid pairing key');
+          return new Response(null, { status: 101, webSocket: client });
+        }
+        // Attach authenticated email to the request URL so the DO can record it
+        const authedUrl = new URL(request.url);
+        authedUrl.searchParams.set('_authed_email', validationResult.email);
+        request = new Request(authedUrl, request);
+      }
+
       const doId = env.SESSIONS.idFromName(sessionId);
       const stub = env.SESSIONS.get(doId);
       return stub.fetch(request);

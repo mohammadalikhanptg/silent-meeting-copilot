@@ -17,12 +17,29 @@ Please ask me about each of the following one section at a time, then produce a 
 
 Once you have all my answers, produce a clean Markdown document I can paste directly into my profile.`;
 
+function detectOS() {
+  if (typeof navigator === 'undefined') return 'unknown';
+  const ua = navigator.userAgent || '';
+  const platform = navigator.platform || '';
+  if (/Win/.test(platform) || /Windows/.test(ua)) return 'windows';
+  if (/Mac/.test(platform) || /Macintosh|MacIntel/.test(ua)) return 'mac';
+  return 'other';
+}
+
 export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
   const [guideCopied, setGuideCopied] = useState(false);
+
+  // Helper pairing key state
+  const [helperKey, setHelperKey] = useState('');
+  const [helperKeyVersion, setHelperKeyVersion] = useState(1);
+  const [keyCopied, setKeyCopied] = useState(false);
+  const [keyRotating, setKeyRotating] = useState(false);
+  const [keyError, setKeyError] = useState('');
+  const [os, setOs] = useState('unknown');
 
   const [businesses, setBusinesses] = useState([]);
   const [postalAddress, setPostalAddress] = useState('');
@@ -42,29 +59,34 @@ export default function ProfilePage() {
   const [dragOver, setDragOver] = useState(false);
 
   useEffect(() => {
-    fetch('/api/profile')
-      .then(r => r.json())
-      .then(d => {
-        if (d.profile) {
-          const p = d.profile;
-          setBusinesses(p.businesses || []);
-          setPostalAddress(p.postal_address || '');
-          setPhone(p.phone || '');
-          setEmails(p.emails || []);
-          setSocialLinks(p.social_links || []);
-          setBio(p.bio || '');
-          setCommonItems(p.common_items || []);
-          setProfileRefText(p.profile_reference_text || '');
-          // Docs: map from content-bearing profile_docs to display metadata
-          setProfileDocs((p.profile_docs || []).map(doc => ({
-            id: doc.id,
-            filename: doc.filename,
-            size_bytes: doc.content_text ? new TextEncoder().encode(doc.content_text).length : 0,
-            added_at: doc.added_at,
-          })));
-        }
-      })
-      .catch(() => setError('Failed to load profile.'))
+    setOs(detectOS());
+
+    Promise.all([
+      fetch('/api/profile').then(r => r.json()),
+      fetch('/api/helper-key').then(r => r.json()),
+    ]).then(([pd, kd]) => {
+      if (pd.profile) {
+        const p = pd.profile;
+        setBusinesses(p.businesses || []);
+        setPostalAddress(p.postal_address || '');
+        setPhone(p.phone || '');
+        setEmails(p.emails || []);
+        setSocialLinks(p.social_links || []);
+        setBio(p.bio || '');
+        setCommonItems(p.common_items || []);
+        setProfileRefText(p.profile_reference_text || '');
+        setProfileDocs((p.profile_docs || []).map(doc => ({
+          id: doc.id,
+          filename: doc.filename,
+          size_bytes: doc.content_text ? new TextEncoder().encode(doc.content_text).length : 0,
+          added_at: doc.added_at,
+        })));
+      }
+      if (kd.key) {
+        setHelperKey(kd.key);
+        setHelperKeyVersion(kd.version ?? 1);
+      }
+    }).catch(() => setError('Failed to load profile.'))
       .finally(() => setLoading(false));
   }, []);
 
@@ -103,6 +125,32 @@ export default function ProfilePage() {
       setGuideCopied(true);
       setTimeout(() => setGuideCopied(false), 2000);
     });
+  };
+
+  // Helper key copy
+  const copyKey = () => {
+    navigator.clipboard.writeText(helperKey).then(() => {
+      setKeyCopied(true);
+      setTimeout(() => setKeyCopied(false), 2000);
+    });
+  };
+
+  // Rotate helper key
+  const rotateKey = async () => {
+    if (!confirm('Rotate your pairing key? Your current key will stop working immediately — you will need to update the helper app with the new key.')) return;
+    setKeyRotating(true);
+    setKeyError('');
+    try {
+      const res = await fetch('/api/helper-key', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Rotate failed');
+      setHelperKey(data.key);
+      setHelperKeyVersion(data.version);
+    } catch (e) {
+      setKeyError(String(e));
+    } finally {
+      setKeyRotating(false);
+    }
   };
 
   // P1: File upload handler
@@ -346,6 +394,91 @@ export default function ProfilePage() {
             {profileDocs.length === 0 && (
               <div style={{ fontSize: 12, color: '#6b7280', fontStyle: 'italic' }}>No profile documents uploaded</div>
             )}
+          </section>
+
+          {/* ---- Desktop Helper download + pairing key ---- */}
+          <section style={{ ...styles.section, border: '1px solid #2a1a4a', background: '#0d0b1a' }}>
+            <div style={styles.sectionHeader}>
+              <span style={{ ...styles.sectionTitle, color: '#a78bfa' }}>Desktop helper</span>
+              <span style={{ fontSize: 11, color: '#6b7280' }}>dual-channel audio capture for your meetings</span>
+            </div>
+            <p style={{ fontSize: 13, color: '#9aa0a6', margin: 0, lineHeight: 1.5 }}>
+              The SMC Helper captures your microphone (ME) and system audio (OTHERS) and streams them to the engine.
+              Download the helper for your platform, then paste your pairing key to bind it to this account.
+            </p>
+
+            {/* Download buttons */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+              {os === 'mac' ? (
+                <>
+                  <a href="/api/downloads/mac" style={styles.downloadBtn}>
+                    Download for Mac (.dmg)
+                  </a>
+                  <a href="/api/downloads/win" style={{ ...styles.downloadBtn, background: '#1a1a2e', borderColor: '#2a2a3e', color: '#9aa0a6' }}>
+                    Also available for Windows (.exe)
+                  </a>
+                </>
+              ) : (
+                <>
+                  <a href="/api/downloads/win" style={styles.downloadBtn}>
+                    Download for Windows (.exe)
+                  </a>
+                  <a href="/api/downloads/mac" style={{ ...styles.downloadBtn, background: '#1a1a2e', borderColor: '#2a2a3e', color: '#9aa0a6' }}>
+                    Also available for Mac (.dmg)
+                  </a>
+                </>
+              )}
+            </div>
+
+            <div style={{ fontSize: 11, color: '#6b7280', marginTop: -4 }}>
+              Unsigned installer — macOS: right-click &gt; Open to bypass Gatekeeper on first launch.
+              Windows: click &ldquo;More info&rdquo; → &ldquo;Run anyway&rdquo; in SmartScreen.
+            </div>
+
+            {/* Pairing key */}
+            <div style={{ background: '#0f0820', border: '1px solid #2a1a4a', borderRadius: 10, padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: '#a78bfa' }}>Your pairing key</span>
+                <span style={{ fontSize: 10, color: '#6b7280' }}>version {helperKeyVersion}</span>
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <code style={{
+                  flex: 1, background: '#07040f', border: '1px solid #2a1a4a',
+                  borderRadius: 6, padding: '7px 10px', fontSize: 11,
+                  color: '#c4b5fd', fontFamily: 'monospace', wordBreak: 'break-all',
+                  userSelect: 'all',
+                }}>
+                  {helperKey || 'Loading…'}
+                </code>
+                <button
+                  style={{ ...styles.copyBtn, background: keyCopied ? '#14532d' : '#1a0a2e', borderColor: keyCopied ? '#22c55e' : '#2a1a4a', color: keyCopied ? '#22c55e' : '#a78bfa', flexShrink: 0 }}
+                  onClick={copyKey}
+                  disabled={!helperKey}
+                >
+                  {keyCopied ? '✓ Copied' : 'Copy'}
+                </button>
+              </div>
+              {keyError && <div style={{ fontSize: 12, color: '#fca5a5' }}>{keyError}</div>}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  style={{ ...styles.addBtn, background: keyRotating ? '#1a0a2e' : '#0f0820', borderColor: '#4b2a7a', color: '#a78bfa' }}
+                  onClick={rotateKey}
+                  disabled={keyRotating || !helperKey}
+                >
+                  {keyRotating ? 'Rotating…' : 'Rotate key'}
+                </button>
+                <span style={{ fontSize: 11, color: '#6b7280' }}>Rotating invalidates the current key immediately.</span>
+              </div>
+            </div>
+
+            {/* Setup steps */}
+            <div style={{ fontSize: 12, color: '#9aa0a6', lineHeight: 1.8 }}>
+              <strong style={{ color: '#a78bfa' }}>Setup:</strong>
+              {' '}1. Download and install the helper above.{' '}
+              2. Copy your pairing key.{' '}
+              3. Open the helper, paste the key in the &ldquo;Pairing key&rdquo; field, click Save.{' '}
+              4. Enter the session code from your browser session page and click Start.
+            </div>
           </section>
 
           {/* Businesses */}
@@ -601,5 +734,10 @@ const styles = {
   saveBtn: {
     border: 'none', borderRadius: 8, padding: '9px 24px',
     fontSize: 14, fontWeight: 600, color: '#fff', cursor: 'pointer', fontFamily: 'inherit',
+  },
+  downloadBtn: {
+    display: 'inline-block', background: '#2a1a5a', border: '1px solid #4b2a8a',
+    borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 600,
+    color: '#c4b5fd', textDecoration: 'none', cursor: 'pointer', fontFamily: 'inherit',
   },
 };

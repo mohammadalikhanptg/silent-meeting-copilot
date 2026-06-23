@@ -1,97 +1,95 @@
-# SMC Helper — Windows Desktop Audio Bridge
+# SMC Helper — Desktop Audio Bridge
 
-Electron app that captures two audio channels and streams them to the Silent Meeting Copilot transcription engine via WebSocket.
+Electron app that captures two audio channels and streams them to the Silent Meeting Copilot transcription engine via WebSocket. Available for Mac and Windows.
 
 ## What it does
 
 | Channel | Source | Label in engine |
 |---------|--------|-----------------|
-| ME | Default microphone (WASAPI input) | `speaker: "me"` |
-| OTHERS | System audio loopback (all speaker output) | `speaker: "others"` |
+| ME | Default microphone (WASAPI input / Mac mic) | `speaker: "me"` |
+| OTHERS | System audio loopback | `speaker: "others"` |
 
 Both channels are chunked every 2.5 seconds and sent as binary WebSocket frames to the engine Durable Object. The engine returns transcript JSON: `{type:"transcript", speaker:"me"|"others", raw:"...", cleaned:"..."}`.
 
-## Prerequisites
+## Download (pre-built)
 
+Go to **Silent Meeting Copilot → Profile → Desktop helper** to download the installer for your platform (Mac .dmg or Windows .exe). Your pairing key is shown there too.
+
+## Pairing key (required)
+
+The helper must be bound to your account before it can stream to your sessions. This prevents any unauthorised app from writing into your meeting transcript.
+
+**Setup:**
+
+1. Sign in to Silent Meeting Copilot.
+2. Go to **Profile → Desktop helper**.
+3. Copy your **pairing key** (starts with `smc1_`).
+4. Open the SMC Helper app, paste the key into the **Pairing key** field, and click **Save**.
+5. The key is stored securely on this device using the OS keychain (Electron safeStorage).
+
+**Rotation:** If you rotate your key from the profile page, the old key stops working immediately. Update the helper with the new key.
+
+## Session pairing
+
+1. Open a live session in the browser — note the session code (e.g., `drk-8421`).
+2. In the helper, enter the same code in the **Session code** field.
+3. Click **Start** — the helper validates your key, binds to your session, and begins streaming.
+
+## Prerequisites (development / build)
+
+- Node.js 20+ (LTS)
+- Mac: Xcode command-line tools (for native modules if needed)
 - Windows 10 / 11 (64-bit)
-- Node.js 20+ (LTS): https://nodejs.org
-- Git (optional, for cloning)
 
-## Setup
+## Run from source
 
-```cmd
+```bash
 cd helper
 npm install
-```
-
-This installs Electron (~300 MB on first run).
-
-## Run
-
-```cmd
 npm start
 ```
 
-The app opens a small window and a system tray icon (teal square).
+## Build installer
 
-1. Select your microphone from the dropdown.
-2. Click **Start** — the app requests microphone permission and opens the loopback stream.
-3. A Windows dialog **may** appear asking which screen/window to share — click any entry and press Share. The video is discarded immediately; only the audio loopback is kept.
-4. Both level meters should move when you speak (ME) or play audio (OTHERS).
-5. Transcripts appear in the log panel as they come back from the engine.
-6. The tray icon tooltip shows **Live — streaming** when active.
+```bash
+npm run dist:mac    # produces .dmg and .zip in dist/
+npm run dist:win    # produces NSIS .exe in dist/
+```
+
+Set `CSC_IDENTITY_AUTO_DISCOVERY=false` to build unsigned (no code signing cert required).
+
+**Unsigned builds:** macOS Gatekeeper will warn on first launch. Right-click the .dmg → Open to bypass. Windows SmartScreen: click "More info" → "Run anyway".
 
 ## Engine URL
 
 Default: `https://smc-engine.ali-6b8.workers.dev`
 
-Override with an environment variable:
-
-```cmd
-set SMC_ENGINE_URL=https://your-worker.workers.dev
-npm start
-```
+Override with `SMC_ENGINE_URL` environment variable.
 
 ## Audio format
 
-The helper sends **WebM/Opus** chunks (the browser's native MediaRecorder format). The engine buffers chunks and flushes to Whisper when 64 KB per channel has accumulated (roughly 4–8 seconds of real speech at 32 kbps).
-
-If the browser does not support `audio/webm;codecs=opus`, it falls back to `audio/ogg;codecs=opus`.
-
-## Build installer (optional)
-
-```cmd
-npm run dist
-```
-
-Produces an NSIS installer in `dist/`. Requires `electron-builder` (installed as a dev dependency).
-
-You need an icon at `assets/icon.ico` for the installer. If missing, the build will succeed but use a default Electron icon.
+WebM/Opus chunks from the browser's native MediaRecorder. Falls back to OGG/Opus if WebM is unavailable. The engine buffers and flushes to Whisper every ~64 KB per channel.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---------|-----|
-| No system loopback audio | Ensure something is playing through the speakers. The loopback captures whatever the Windows audio mixer is playing. |
-| Tray icon missing | The icon is generated inline; if it fails, re-run `npm start`. |
+| Auth error / key rejected | Check the pairing key matches what's shown on your profile page. Rotate and re-paste if needed. |
+| No system loopback audio | Ensure audio is playing. On Mac, the loopback requires macOS 14+ or a virtual audio device (e.g. BlackHole). On Windows, WASAPI loopback is used. |
 | WebSocket timeout | Check the engine URL is reachable and the Cloudflare Worker is deployed. |
-| Microphone access denied | Allow mic in Windows Settings → Privacy → Microphone. |
-| Screen-share picker appears every time | This is expected on first run. Electron's `setDisplayMediaRequestHandler` is used to suppress it after the first permission grant on some Windows versions. |
+| Microphone access denied | Allow mic in System Settings / Windows Privacy settings. |
 
 ## Architecture
 
 ```
-Windows
+Mac / Windows
   └─ SMC Helper (Electron)
-       ├─ main.js          Electron main process, tray icon, IPC
-       ├─ preload.js       Context bridge (main ↔ renderer)
-       └─ renderer.js      UI + MediaRecorder + WebSocket client
+       ├─ main.js       Main process, tray, safeStorage IPC
+       ├─ preload.js    Context bridge (main ↔ renderer)
+       └─ renderer.js   UI + pairing key + MediaRecorder + WebSocket
              │
-             │  Binary WebSocket frames
+             │  Binary WebSocket frames (?key=smc1_xxx.yyy)
              ▼
   Cloudflare Worker (smc-engine)
-       └─ SessionDO        Durable Object per session
-             │
-             ├─ @cf/openai/whisper         Speech-to-text
-             └─ @cf/meta/llama-3.2-3b     Transcript cleanup
+       └─ SessionDO     Validates pairing key → bins to user → Whisper → LLM
 ```
