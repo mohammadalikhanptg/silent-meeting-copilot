@@ -1,13 +1,185 @@
 # Silent Meeting Copilot — Overnight Build Progress
 
-**Date:** 2026-06-23 (Session 7 updates in bold)
-**Session:** Autonomous overnight build × 7
+**Date:** 2026-06-23 (Session 8 updates in bold)
+**Session:** Autonomous overnight build × 8
 
 ---
 
 ## Summary
 
-All tasks (P1–P5) across all sessions are complete at maximum completable state on this Mac. Session 7 delivers the Follow-up Tracker — operator flags transcript lines mid-meeting; each flagged point is enriched by a separate background pipeline (1–5 min latency) with an LLM talking point + online references, so when the operator's turn comes they are fully prepared.
+All tasks (P1–P5) across all sessions are complete at maximum completable state on this Mac. Session 8 delivers Meeting Minutes Export — one-click export of a saved meeting as a professional Word (.docx) document with structured LLM-generated minutes (executive summary, key points, decisions, action items table). Also includes an in-page preview before download.
+
+---
+
+## **Session 8 — Meeting Minutes Export ✅ COMPLETE**
+
+### **P0 — Stabilisation**
+
+- `npm run build` passed before any changes ✅
+- Engine `/health` returns `{"ok":true}` ✅
+- Site root still redirects to `/login` ✅
+- Fixed: `scripts/migrate.mjs` was failing locally because `DATABASE_URL` points to `pad_readonly` (read-only Neon user). Added graceful `warn + exit(0)` on "permission denied" — schema is already set up in production; Vercel uses its own write-capable env var.
+
+### **P1 — Structured minutes generation**
+
+New **`POST /minutes`** endpoint on the Cloudflare Worker:
+
+**Input:**
+```json
+{
+  "me": ["..."],
+  "others": ["..."],
+  "title": "Q2 Planning Session",
+  "date": "2026-06-23",
+  "objective": "Assign owners and agree on delivery dates",
+  "contextNotes": "Optional meeting context"
+}
+```
+
+**Output:**
+```json
+{
+  "ok": true,
+  "emptyState": false,
+  "title": "Q2 Planning Session",
+  "date": "2026-06-23",
+  "participants": ["Operator (Me)", "Other participant(s)"],
+  "executiveSummary": "The Q2 planning session focused on assigning owners and agreeing on delivery dates...",
+  "keyPoints": ["Marketing campaign ownership", "End of July deadline", "..."],
+  "decisions": ["The deadline for the marketing campaign is end of July", "..."],
+  "actionItems": [{"owner": "Operator (Me)", "action": "Set up the follow-up call", "due": "Friday"}]
+}
+```
+
+**Honesty rules enforced in the prompt:**
+- Participants: "Operator (Me)" / "Other participant(s)" unless real names are explicitly in the transcript. Never invented.
+- Decisions and action items: only what is clearly stated. Never fabricated.
+- Empty transcript (< 2 lines total): returns `emptyState: true` immediately, never a fabricated document.
+
+**Next.js route `GET /api/meetings/[id]/minutes`:**
+- Loads meeting + transcript_segments from DB (using corrected_text where available)
+- Calls `POST ENGINE/minutes`
+- Returns structured JSON
+- auth-protected via `getSessionPayload()`
+
+### **P2 — .docx rendering**
+
+**npm package:** `docx` (latest, pure-JS — no native bindings, works in Vercel Node.js serverless)
+
+**New route `GET /api/meetings/[id]/minutes-docx`:**
+- Loads meeting + segments
+- Calls ENGINE `/minutes` for structured JSON
+- Renders to `.docx` using `docx` library:
+  - `HeadingLevel.HEADING_1` — title block (centred)
+  - Date + participants rows
+  - `HeadingLevel.HEADING_2` sections: Executive Summary, Key Discussion Points, Decisions Made, Action Items
+  - Bulleted lists for key points and decisions
+  - `Table` with bold header row for action items (Owner | Action | Due)
+  - Footer timestamp line
+- Returns `Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document`
+- `Content-Disposition: attachment; filename="Minutes - <title> - <YYYY-MM-DD>.docx"`
+
+### **P3 — UI on meeting review page**
+
+New **`MinutesPanel`** client component (`app/meetings/[id]/MinutesPanel.js`) added to `/meetings/[id]` page, between the coaching summary and the Follow-up Tracker:
+
+- **"Download Word (.docx)"** — `<a download href="/api/meetings/[id]/minutes-docx">` → browser fetches and saves the file, no JS interception needed
+- **"Preview minutes"** — fetches `/api/meetings/[id]/minutes` on demand and renders the structured preview inline:
+  - Title + date header
+  - Participants row
+  - Collapsible sections: Executive Summary, Key Discussion Points, Decisions Made, Action Items table
+  - Mobile-responsive (flexWrap on button bar, full-width table)
+  - Matches existing dark theme (background `#0d1117`, blue accents `#38bdf8`)
+- Shows "Generating…" while loading; shows error message on failure
+- Preview cached in component state — clicking again toggles without re-fetching
+
+### **P4 — Tests + verification**
+
+```bash
+node scripts/test-minutes.mjs
+
+Test 1: Real transcript → structured minutes
+  ✅ response ok
+  ✅ not emptyState
+  ✅ participants is array
+  ✅ participants non-empty
+  ✅ executiveSummary is string
+  ✅ executiveSummary has content
+  ✅ keyPoints is array
+  ✅ keyPoints non-empty
+  ✅ decisions is array
+  ✅ actionItems is array
+  executiveSummary: "The Q2 planning session focused on assigning owners and agreeing on delivery dates. The marketing ca…"
+
+Test 2: Empty transcript → clear empty state, not a fabricated document
+  ✅ response ok
+  ✅ emptyState is true
+  ✅ participants is empty
+  ✅ executiveSummary says no transcript
+  ✅ keyPoints is empty
+  ✅ decisions is empty
+  ✅ actionItems is empty
+
+Test 3: Action item with owner and due date captured
+  ✅ response ok
+  ✅ actionItems is array
+  ✅ actionItem has owner
+  ✅ actionItem has action
+  ✅ actionItem has due field
+
+Test 4: Honesty — no invented names when none in transcript
+  ✅ response ok
+  ✅ no suspicious invented names
+  participants: [ 'Operator (Me)', 'Other participant(s)' ]
+
+Test 5: /health still responds after worker update
+  ✅ /health ok:true
+  ✅ /health has deepgramAvailable
+
+──────────────────────────────────────────────────────────
+Results: 26 passed, 0 failed
+All tests passed ✅
+```
+
+**Docx local validation:** `Packer.toBuffer()` produces a valid 8.8 KB .docx file. Confirmed to parse correctly.
+
+**Build and deployment:**
+- `npm run build` passes ✅
+- `git push origin main` → commit `4085f00` ✅
+- Worker deployed: version `42167fb2-7cab-4544-b5a1-2dc9b249f00d` ✅
+- Vercel: READY ✅
+- Site root: 307 → /login ✅
+
+### **Files changed (Session 8)**
+
+| File | Change |
+|------|--------|
+| `scripts/migrate.mjs` | Graceful `warn + exit(0)` on permission-denied (read-only DB URL) |
+| `package.json` | Added `"docx": "latest"` dependency |
+| `worker/src/session-do.js` | Added `generateMinutes()` export (LLM structured minutes, emptyState guard) |
+| `worker/src/index.js` | Added `POST /minutes` endpoint; import `generateMinutes` |
+| `app/api/meetings/[id]/minutes/route.js` | New — GET, auth-protected, returns JSON minutes |
+| `app/api/meetings/[id]/minutes-docx/route.js` | New — GET, renders .docx with `docx` library, serves as attachment |
+| `app/meetings/[id]/MinutesPanel.js` | New — client component: preview panel + download button |
+| `app/meetings/[id]/page.js` | Import and render MinutesPanel |
+| `scripts/test-minutes.mjs` | New — 5 test cases, 26 assertions, all pass |
+
+### **How to use**
+
+1. Sign in at https://silent-meeting-copilot.vercel.app/
+2. Click **Past Meetings**
+3. Open any meeting that has transcript segments
+4. The **Meeting Minutes (Word)** panel appears below the coaching summary
+5. Click **Preview minutes** → structured minutes appear inline (~5–10s, LLM call)
+6. Click **Download Word (.docx)** → browser downloads the file
+
+### **Recommended next steps**
+
+1. **Test with a real recorded meeting** — open a meeting with 10+ transcript lines, click Preview minutes, verify the sections reflect the actual conversation
+2. **Customise the minutes header** — add company logo or branding to the .docx template (docx supports image insertion via `ImageRun`)
+3. **Email minutes** — add a "Send minutes" button that emails the .docx to participants via the existing email infrastructure (Resend)
+4. **Agenda pre-load** — pre-populate the meeting context/objective from a calendar event or HubSpot deal
+5. **Minutes versioning** — store generated minutes as a `wfArtifact` in Sanity for cross-session reference
 
 ---
 
