@@ -7,6 +7,7 @@ import {
   sessionCookieValue, cookieOptions, SESSION_COOKIE, SESSION_MAXAGE, PRE_COOKIE,
   isAllowed,
 } from '../../../lib/auth';
+import { alertNewDevice, alertTotpLockout } from '../../../lib/auth-alerts';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -61,6 +62,7 @@ export async function POST(req) {
 
   const failCount = failures[0]?.n || 0;
   if (failCount >= TOTP_FAIL_MAX) {
+    alertTotpLockout(pre.email, ip).catch(() => {});
     return NextResponse.json({ error: 'locked', message: 'Too many failed attempts. Try again in 15 minutes.' }, { status: 429 });
   }
 
@@ -73,6 +75,7 @@ export async function POST(req) {
     await sql`INSERT INTO auth_attempts (type, key, success, ip) VALUES ('totp', ${lockoutKey}, false, ${ip})`.catch(() => {});
     const nowFails = failCount + 1;
     const remaining = TOTP_FAIL_MAX - nowFails;
+    if (remaining <= 0) alertTotpLockout(pre.email, ip).catch(() => {});
     return NextResponse.json(
       remaining > 0
         ? { error: 'bad_code', attemptsLeft: remaining }
@@ -81,11 +84,23 @@ export async function POST(req) {
     );
   }
 
-  // Success
+  // Success — record attempt
   await sql`INSERT INTO auth_attempts (type, key, success, ip) VALUES ('totp', ${lockoutKey}, true, ${ip})`.catch(() => {});
   await sql`UPDATE auth_users SET totp_verified_at = COALESCE(totp_verified_at, now()), last_login_at = now() WHERE email = ${pre.email}`;
 
   const ua = req.headers.get('user-agent') || null;
+
+  // New-device detection: any prior session with same IP+UA combo?
+  const known = await sql`
+    SELECT id FROM sessions
+    WHERE email = ${pre.email} AND revoked_at IS NULL
+      AND ip = ${ip} AND user_agent = ${ua}
+    LIMIT 1
+  `.catch(() => []);
+  if (!known[0]) {
+    alertNewDevice(pre.email, ip, ua).catch(() => {});
+  }
+
   const s = await sql`INSERT INTO sessions (email, expires_at, ip, user_agent) VALUES (${pre.email}, now() + interval '7 days', ${ip}, ${ua}) RETURNING id`;
   const sid = s[0].id;
 

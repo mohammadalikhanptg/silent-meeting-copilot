@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { getSql } from './db';
 import { verifySync, generateSync, generateSecret as otplibGenerateSecret } from 'otplib';
 
@@ -154,7 +154,13 @@ export async function getSessionPayload() {
     `;
     if (!rows[0]) return null;
     const row = rows[0];
-    if (row.revoked_at) return null;
+    if (row.revoked_at) {
+      // Alert on revoked session use — fire-and-forget, never block
+      const h = await headers().catch(() => null);
+      const ip = h?.get('x-forwarded-for')?.split(',')[0]?.trim() || null;
+      import('./auth-alerts.js').then(({ alertRevokedSession }) => alertRevokedSession(p.email, p.sid, ip).catch(() => {})).catch(() => {});
+      return null;
+    }
     if (new Date(row.expires_at) < new Date()) return null;
     sql`UPDATE sessions SET last_seen = now() WHERE id = ${p.sid}`.catch(() => {});
   } catch (e) {
