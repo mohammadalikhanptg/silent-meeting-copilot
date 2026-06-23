@@ -10,6 +10,9 @@ const COACH_MIN_SEGMENTS = 3;
 const FLAG_POLL_INTERVAL_MS = 30000;
 const ASSIST_DEDUP_KEY = (card) => `${card.type}:${card.label}:${card.value}`;
 
+const ALLOWED_EXTENSIONS = ['.md', '.txt'];
+const MAX_FILE_BYTES = 256 * 1024; // 256 KB
+
 const MODE_LANG = { english: 'en', 'hindi-urdu': 'hi', auto: null };
 const MODE_LABEL = { english: 'English (fast)', 'hindi-urdu': 'Hindi / Urdu', auto: 'Auto-detect' };
 
@@ -29,20 +32,26 @@ function encodeChunk(speaker, audioBuffer) {
 
 export default function SessionPage() {
   const [sessionCode, setSessionCode] = useState('');
+  const [meetingId, setMeetingId] = useState(null); // set from ?m= param or on create
+  const [title, setTitle] = useState('');
   const [mode, setMode] = useState('english');
   const [objective, setObjective] = useState('');
   const [contextNotes, setContextNotes] = useState('');
+  const [refDocs, setRefDocs] = useState([]); // [{id, filename, size_bytes, content_text}]
   const [status, setStatus] = useState('idle');
   const [meLines, setMeLines] = useState([]);
   const [othersLines, setOthersLines] = useState([]);
   const [coaching, setCoaching] = useState(null);
   const [assistCards, setAssistCards] = useState([]);
   const [copiedAssist, setCopiedAssist] = useState(null);
-  const [flaggedItems, setFlaggedItems] = useState([]); // [{id,text,speaker,ts,status,assist_text,references,addressed}]
+  const [flaggedItems, setFlaggedItems] = useState([]);
   const [error, setError] = useState('');
   const [wsConnected, setWsConnected] = useState(false);
   const [copied, setCopied] = useState(false);
   const [deepgramAvailable, setDeepgramAvailable] = useState(null);
+  const [saveStatus, setSaveStatus] = useState(''); // '', 'saving', 'saved', 'error'
+  const [uploadError, setUploadError] = useState('');
+  const [isDragOver, setIsDragOver] = useState(false);
 
   const wsRef = useRef(null);
   const recorderRef = useRef(null);
@@ -56,6 +65,7 @@ export default function SessionPage() {
   const othersLinesRef = useRef([]);
   const objectiveRef = useRef('');
   const contextNotesRef = useRef('');
+  const refDocsRef = useRef([]);
   const profileRef = useRef(null);
   const seenAssistKeys = useRef(new Set());
   const flaggedItemsRef = useRef([]);
@@ -64,17 +74,20 @@ export default function SessionPage() {
   useEffect(() => { othersLinesRef.current = othersLines; }, [othersLines]);
   useEffect(() => { objectiveRef.current = objective; }, [objective]);
   useEffect(() => { contextNotesRef.current = contextNotes; }, [contextNotes]);
+  useEffect(() => { refDocsRef.current = refDocs; }, [refDocs]);
   useEffect(() => { flaggedItemsRef.current = flaggedItems; }, [flaggedItems]);
+  useEffect(() => { meetingIdRef.current = meetingId; }, [meetingId]);
 
   const meScrollRef = useRef(null);
   const otScrollRef = useRef(null);
   useEffect(() => { meScrollRef.current?.scrollTo(0, meScrollRef.current.scrollHeight); }, [meLines]);
   useEffect(() => { otScrollRef.current?.scrollTo(0, otScrollRef.current.scrollHeight); }, [othersLines]);
 
-  // On mount: set session code from URL or generate
+  // On mount: set session code from URL or generate; also read ?m= for preloaded meeting
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const urlCode = params.get('s');
+    const urlMeetingId = params.get('m');
     const code = urlCode || generateShortCode();
     setSessionCode(code);
     if (!urlCode) {
@@ -82,7 +95,37 @@ export default function SessionPage() {
       u.searchParams.set('s', code);
       history.replaceState({}, '', u);
     }
-  }, []);
+    if (urlMeetingId) {
+      setMeetingId(urlMeetingId);
+      // Load existing meeting data
+      loadMeeting(urlMeetingId);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function loadMeeting(id) {
+    try {
+      // Load meeting metadata
+      const res = await fetch(`/api/meetings/${id}/prep`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.meeting) {
+          if (data.meeting.title) setTitle(data.meeting.title);
+          if (data.meeting.objective) setObjective(data.meeting.objective);
+          if (data.meeting.context_notes) setContextNotes(data.meeting.context_notes);
+          if (data.meeting.language_mode) setMode(data.meeting.language_mode);
+        }
+      }
+      // Load reference docs
+      const docsRes = await fetch(`/api/meetings/${id}/ref-docs`);
+      if (docsRes.ok) {
+        const docsData = await docsRes.json();
+        if (docsData.docs) {
+          // Docs from DB don't have content_text in the list response (just metadata)
+          setRefDocs(docsData.docs.map(d => ({ ...d, content_text: '' })));
+        }
+      }
+    } catch (_) {}
+  }
 
   // On mount: check Deepgram availability
   useEffect(() => {
@@ -127,6 +170,11 @@ export default function SessionPage() {
             others,
             objective: objectiveRef.current,
             profile: profileRef.current,
+            context: contextNotesRef.current,
+            refDocs: refDocsRef.current.filter(d => d.content_text).map(d => ({
+              filename: d.filename,
+              content_text: d.content_text,
+            })),
           }),
         });
         const data = await res.json();
@@ -172,7 +220,7 @@ export default function SessionPage() {
     return () => clearInterval(timer);
   }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Flagged items polling — every 30s while live or stopped, only when there are items pending
+  // Flagged items polling — every 30s while live or stopped
   useEffect(() => {
     if (status !== 'live' && status !== 'stopped') return;
     if (!meetingIdRef.current) return;
@@ -180,7 +228,7 @@ export default function SessionPage() {
     const poll = async () => {
       const current = flaggedItemsRef.current;
       const hasPending = current.some(f => f.status === 'pending' || f.status === 'processing');
-      if (!hasPending && current.length > 0) return; // all enriched, no need to poll
+      if (!hasPending && current.length > 0) return;
 
       try {
         const res = await fetch(`/api/flagged-items?meetingId=${meetingIdRef.current}`);
@@ -188,7 +236,6 @@ export default function SessionPage() {
         const data = await res.json();
         if (data.ok && Array.isArray(data.items)) {
           setFlaggedItems(prev => {
-            // Merge DB state into local state preserving local UI ordering
             const byId = {};
             for (const item of data.items) byId[item.id] = item;
             return prev.map(f => {
@@ -216,6 +263,150 @@ export default function SessionPage() {
     liveStatus.current = s;
     setStatus(s);
   }, []);
+
+  // Save preparation without going live
+  const savePrep = useCallback(async () => {
+    setSaveStatus('saving');
+    try {
+      let mId = meetingIdRef.current;
+      if (!mId) {
+        // Create meeting row
+        const res = await fetch('/api/meetings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: title || null,
+            objective: objective || null,
+            language_mode: mode,
+            context_notes: contextNotes || null,
+          }),
+        });
+        if (!res.ok) throw new Error('Create failed');
+        const data = await res.json();
+        mId = data.id;
+        setMeetingId(mId);
+        // Update URL
+        const u = new URL(window.location.href);
+        u.searchParams.set('m', mId);
+        history.replaceState({}, '', u);
+      } else {
+        // Update existing meeting
+        await fetch(`/api/meetings/${mId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: title || null,
+            objective: objective || null,
+            context_notes: contextNotes || null,
+          }),
+        });
+      }
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus(''), 3000);
+    } catch (_) {
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus(''), 3000);
+    }
+  }, [title, objective, mode, contextNotes]);
+
+  // Upload a reference document (called after file is read as text)
+  const uploadRefDoc = useCallback(async (filename, content) => {
+    setUploadError('');
+
+    // Client-side validation
+    const lower = filename.toLowerCase();
+    if (!ALLOWED_EXTENSIONS.some(ext => lower.endsWith(ext))) {
+      setUploadError(`"${filename}" is not allowed. Only .md and .txt files are accepted.`);
+      return;
+    }
+    const bytes = new TextEncoder().encode(content).length;
+    if (bytes > MAX_FILE_BYTES) {
+      setUploadError(`"${filename}" is too large (${Math.ceil(bytes / 1024)} KB). Maximum is 256 KB.`);
+      return;
+    }
+
+    // Ensure we have a meeting ID
+    let mId = meetingIdRef.current;
+    if (!mId) {
+      try {
+        const res = await fetch('/api/meetings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: title || null,
+            objective: objective || null,
+            language_mode: mode,
+            context_notes: contextNotes || null,
+          }),
+        });
+        if (!res.ok) throw new Error('Create failed');
+        const data = await res.json();
+        mId = data.id;
+        setMeetingId(mId);
+        const u = new URL(window.location.href);
+        u.searchParams.set('m', mId);
+        history.replaceState({}, '', u);
+      } catch (_) {
+        setUploadError('Could not create session. Please try again.');
+        return;
+      }
+    }
+
+    try {
+      const res = await fetch(`/api/meetings/${mId}/ref-docs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename, content }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setUploadError(data.error || 'Upload failed');
+        return;
+      }
+      // Add to local state with content for coaching context
+      setRefDocs(prev => [...prev, { ...data.doc, content_text: content }]);
+    } catch (_) {
+      setUploadError('Upload failed. Please try again.');
+    }
+  }, [title, objective, mode, contextNotes]);
+
+  const removeRefDoc = useCallback(async (docId) => {
+    const mId = meetingIdRef.current;
+    if (!mId) return;
+    try {
+      await fetch(`/api/meetings/${mId}/ref-docs/${docId}`, { method: 'DELETE' });
+      setRefDocs(prev => prev.filter(d => d.id !== docId));
+    } catch (_) {}
+  }, []);
+
+  // Handle file drop or input
+  const handleFiles = useCallback((files) => {
+    for (const file of files) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        uploadRefDoc(file.name, e.target.result);
+      };
+      reader.readAsText(file, 'utf-8');
+    }
+  }, [uploadRefDoc]);
+
+  const handleDrop = useCallback((e) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    handleFiles(Array.from(e.dataTransfer.files));
+  }, [handleFiles]);
+
+  const handleDragOver = useCallback((e) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback(() => setIsDragOver(false), []);
+
+  const handleFileInput = useCallback((e) => {
+    handleFiles(Array.from(e.target.files));
+    e.target.value = '';
+  }, [handleFiles]);
 
   // Flag a transcript line for follow-up
   const flagItem = useCallback(async (text, speaker, ts, segmentId) => {
@@ -250,19 +441,16 @@ export default function SessionPage() {
       if (!data.id) return;
 
       const itemId = data.id;
-      // Update optimistic item with real ID
       setFlaggedItems(prev =>
         prev.map(f => f === optimisticItem ? { ...f, id: itemId, status: 'processing' } : f)
       );
 
-      // Mark line as flagged in transcript
       if (speaker === 'me') {
         setMeLines(prev => prev.map(l => l.ts === ts && l.cleaned === text ? { ...l, flagged: true } : l));
       } else {
         setOthersLines(prev => prev.map(l => l.ts === ts && (l.cleaned === text || l.corrected === text) ? { ...l, flagged: true } : l));
       }
 
-      // Fire-and-forget enrichment (runs on secondary pipeline — does NOT block transcript)
       fetch(`/api/flagged-items/${itemId}/process`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -274,7 +462,6 @@ export default function SessionPage() {
     } catch (_) {}
   }, []);
 
-  // Mark a flagged item as addressed (or un-address it)
   const markAddressed = useCallback(async (itemId, addressed) => {
     setFlaggedItems(prev =>
       prev.map(f => f.id === itemId ? { ...f, addressed } : f)
@@ -308,20 +495,39 @@ export default function SessionPage() {
     setFlaggedItems([]);
     seenAssistKeys.current = new Set();
 
+    // Use existing meeting ID or create one
     try {
-      const meetingRes = await fetch('/api/meetings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: `Session ${sessionCode}`,
-          objective: objective || null,
-          language_mode: mode,
-          context_notes: contextNotes || null,
-        }),
-      });
-      if (meetingRes.ok) {
-        const meetingData = await meetingRes.json();
-        meetingIdRef.current = meetingData.id;
+      let mId = meetingIdRef.current;
+      if (!mId) {
+        const meetingRes = await fetch('/api/meetings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: title || `Session ${sessionCode}`,
+            objective: objective || null,
+            language_mode: mode,
+            context_notes: contextNotes || null,
+          }),
+        });
+        if (meetingRes.ok) {
+          const meetingData = await meetingRes.json();
+          mId = meetingData.id;
+          setMeetingId(mId);
+          const u = new URL(window.location.href);
+          u.searchParams.set('m', mId);
+          history.replaceState({}, '', u);
+        }
+      } else {
+        // Update existing prepared meeting with current form values
+        await fetch(`/api/meetings/${mId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: title || `Session ${sessionCode}`,
+            objective: objective || null,
+            context_notes: contextNotes || null,
+          }),
+        }).catch(() => {});
       }
     } catch (_) {
       meetingIdRef.current = null;
@@ -472,7 +678,7 @@ export default function SessionPage() {
       streamRef.current?.getTracks().forEach(t => t.stop());
       wsRef.current = null; recorderRef.current = null; streamRef.current = null;
     }
-  }, [sessionCode, mode, objective, contextNotes, deepgramAvailable, updateStatus]);
+  }, [sessionCode, mode, objective, contextNotes, title, deepgramAvailable, updateStatus]);
 
   const stopSession = useCallback(() => {
     intentionalStop.current = true;
@@ -520,6 +726,7 @@ export default function SessionPage() {
   const activeFlaggedItems = flaggedItems.filter(f => !f.addressed);
   const addressedCount = flaggedItems.filter(f => f.addressed).length;
   const showFollowUp = (isLive || status === 'stopped') && flaggedItems.length > 0;
+  const showPrepPanel = !isLive && !isConnecting;
 
   return (
     <>
@@ -534,6 +741,8 @@ export default function SessionPage() {
         .smc-flag-btn { opacity: 0.25; transition: opacity 0.15s; }
         .smc-flag-btn:hover { opacity: 1 !important; }
         .smc-flag-btn.flagged { opacity: 1 !important; }
+        .smc-drop-zone { border: 2px dashed #2a2f37; border-radius: 8px; padding: 20px 16px; text-align: center; cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+        .smc-drop-zone.drag-over { border-color: #38bdf8; background: #0c1f33; }
       `}</style>
       <div style={styles.root}>
 
@@ -542,8 +751,8 @@ export default function SessionPage() {
           <div>
             <div style={styles.brand}>Silent Meeting Copilot</div>
             <div style={{ display: 'flex', gap: 12, marginTop: 2 }}>
-              <a href="/" style={styles.navLink}>&larr; Home</a>
-              <a href="/meetings" style={styles.navLink}>Past meetings</a>
+              <a href="/meetings" style={styles.navLink}>&larr; Sessions</a>
+              <a href="/profile" style={styles.navLink}>Profile</a>
             </div>
           </div>
 
@@ -598,35 +807,135 @@ export default function SessionPage() {
           </div>
         </div>
 
-        {/* Pre-session inputs: objective + context notes */}
-        {!isLive && !isConnecting && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={styles.objectiveRow}>
-              <label style={styles.selectorLabel} htmlFor="objective">
-                Meeting objective (optional — enables coaching alignment notes)
-              </label>
-              <input
-                id="objective"
-                type="text"
-                value={objective}
-                onChange={e => setObjective(e.target.value)}
-                placeholder="e.g. Agree on project timeline and assign owners"
-                style={styles.objectiveInput}
-                maxLength={200}
-              />
+        {/* Preparation panel — visible when not live */}
+        {showPrepPanel && (
+          <div style={styles.prepPanel}>
+            <div style={styles.prepHeader}>
+              <span style={styles.prepTitle}>Session preparation</span>
+              {meetingId && <span style={{ fontSize: 11, color: '#6b7280' }}>ID: {meetingId.slice(0, 8)}…</span>}
             </div>
-            <div style={styles.objectiveRow}>
-              <label style={styles.selectorLabel} htmlFor="context-notes">
-                Meeting context / agenda (optional — used when enriching flagged talking points)
-              </label>
-              <textarea
-                id="context-notes"
-                value={contextNotes}
-                onChange={e => setContextNotes(e.target.value)}
-                placeholder="e.g. Quarterly review with client X. They are evaluating switching fleet to EV. We offer EV fleet advisory."
-                style={{ ...styles.objectiveInput, minHeight: 68, resize: 'vertical', fontFamily: 'inherit' }}
-                maxLength={1000}
-              />
+            <div style={styles.prepBody}>
+              {/* Title */}
+              <div style={styles.fieldRow}>
+                <label style={styles.selectorLabel} htmlFor="session-title">Session title (optional)</label>
+                <input
+                  id="session-title"
+                  type="text"
+                  value={title}
+                  onChange={e => setTitle(e.target.value)}
+                  placeholder="e.g. Q2 Planning — Client X"
+                  style={styles.textInput}
+                  maxLength={120}
+                />
+              </div>
+
+              {/* Objective */}
+              <div style={styles.fieldRow}>
+                <label style={styles.selectorLabel} htmlFor="objective">
+                  Meeting objective (optional — enables coaching alignment)
+                </label>
+                <input
+                  id="objective"
+                  type="text"
+                  value={objective}
+                  onChange={e => setObjective(e.target.value)}
+                  placeholder="e.g. Agree on project timeline and assign owners"
+                  style={styles.textInput}
+                  maxLength={200}
+                />
+              </div>
+
+              {/* Context notes — prominently labelled */}
+              <div style={styles.fieldRow}>
+                <label style={styles.selectorLabel} htmlFor="context-notes">
+                  Meeting context and coaching instructions
+                </label>
+                <textarea
+                  id="context-notes"
+                  value={contextNotes}
+                  onChange={e => setContextNotes(e.target.value)}
+                  placeholder="Describe what this meeting is about and how you want to be coached. E.g. 'Quarterly review with client X. They are evaluating EV fleet options. We offer fleet advisory. Coach me to ask about budget and timeline.'"
+                  style={{ ...styles.textInput, minHeight: 80, resize: 'vertical', fontFamily: 'inherit' }}
+                  maxLength={2000}
+                />
+                <div style={{ fontSize: 10, color: '#4b5563', marginTop: 2 }}>
+                  {contextNotes.length}/2000 chars — this feeds the coaching AI for this session
+                </div>
+              </div>
+
+              {/* Reference document upload */}
+              <div style={styles.fieldRow}>
+                <label style={styles.selectorLabel}>
+                  Reference documents (.md or .txt only, max 256 KB each)
+                </label>
+                <div
+                  className={`smc-drop-zone${isDragOver ? ' drag-over' : ''}`}
+                  onDrop={handleDrop}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onClick={() => document.getElementById('file-input').click()}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <input
+                    id="file-input"
+                    type="file"
+                    accept=".md,.txt"
+                    multiple
+                    style={{ display: 'none' }}
+                    onChange={handleFileInput}
+                  />
+                  <div style={{ fontSize: 13, color: '#6b7280' }}>
+                    Drop .md or .txt files here, or <span style={{ color: '#38bdf8', textDecoration: 'underline' }}>click to browse</span>
+                  </div>
+                  <div style={{ fontSize: 11, color: '#4b5563', marginTop: 4 }}>
+                    Upload briefs, notes, or agendas. Content feeds the coaching AI as reference only.
+                  </div>
+                </div>
+                {uploadError && (
+                  <div style={styles.uploadError}>{uploadError}</div>
+                )}
+                {refDocs.length > 0 && (
+                  <div style={styles.docList}>
+                    {refDocs.map(doc => (
+                      <div key={doc.id} style={styles.docItem}>
+                        <span style={styles.docIcon}>📄</span>
+                        <span style={styles.docName}>{doc.filename}</span>
+                        {doc.size_bytes && (
+                          <span style={styles.docSize}>{Math.ceil(doc.size_bytes / 1024)} KB</span>
+                        )}
+                        <button
+                          onClick={() => removeRefDoc(doc.id)}
+                          style={styles.docRemove}
+                          title="Remove document"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Save button */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
+                <button
+                  onClick={savePrep}
+                  disabled={saveStatus === 'saving'}
+                  style={{
+                    ...styles.btn,
+                    background: saveStatus === 'saved' ? '#166534' : saveStatus === 'error' ? '#7f1d1d' : '#1e3a5f',
+                    minWidth: 140,
+                  }}
+                >
+                  {saveStatus === 'saving' ? 'Saving…'
+                    : saveStatus === 'saved' ? '✓ Saved'
+                    : saveStatus === 'error' ? 'Save failed'
+                    : 'Save preparation'}
+                </button>
+                <span style={{ fontSize: 12, color: '#6b7280' }}>
+                  Save without going live — reopen anytime
+                </span>
+              </div>
             </div>
           </div>
         )}
@@ -644,85 +953,87 @@ export default function SessionPage() {
         )}
         {error && <div style={styles.errorBox}>{error}</div>}
 
-        {/* Transcript panels */}
-        <div className="smc-grid" style={styles.grid}>
-          {/* ME panel */}
-          <div style={{ ...styles.panel, borderColor: '#22c55e' }}>
-            <div style={{ ...styles.panelHead, color: '#22c55e' }}>ME — microphone</div>
-            <div ref={meScrollRef} style={styles.transcript}>
-              {meLines.length === 0 && <span style={styles.muted}>Your speech will appear here…</span>}
-              {meLines.map((l, i) => (
-                <div key={i} style={styles.line}>
-                  <span style={styles.ts}>{l.ts}</span>
-                  <span style={{ flex: 1 }}>{l.cleaned}</span>
-                  {l.raw !== l.cleaned && (
-                    <span style={styles.hint} title={l.raw}> [raw differs]</span>
-                  )}
-                  {isLive && meetingIdRef.current && (
-                    <button
-                      className={`smc-flag-btn${l.flagged ? ' flagged' : ''}`}
-                      onClick={() => !l.flagged && flagItem(l.cleaned, 'me', l.ts, null)}
-                      style={{
-                        ...styles.flagBtn,
-                        color: l.flagged ? '#f59e0b' : '#9aa0a6',
-                        cursor: l.flagged ? 'default' : 'pointer',
-                      }}
-                      title={l.flagged ? 'Flagged for follow-up' : 'Flag this for follow-up'}
-                    >
-                      {l.flagged ? '⚑' : '⚐'}
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* OTHERS panel */}
-          <div style={{ ...styles.panel, borderColor: '#38bdf8' }}>
-            <div style={{ ...styles.panelHead, color: '#38bdf8' }}>
-              OTHERS — system audio
-              {correctionCount > 0 && (
-                <span style={styles.correctionCountBadge}>{correctionCount} clarified</span>
-              )}
-            </div>
-            <div ref={otScrollRef} style={styles.transcript}>
-              {othersLines.length === 0 && (
-                <span style={styles.muted}>
-                  Others&apos; speech appears here via the desktop helper.<br />
-                  Share code <strong style={{ color: '#2AB49F' }}>{sessionCode || '…'}</strong> or use Copy link above.
-                </span>
-              )}
-              {othersLines.map((l, i) => (
-                <div key={i} style={styles.line}>
-                  <span style={styles.ts}>{l.ts}</span>
-                  {l.clarifiedByMe ? (
-                    <span style={{ flex: 1 }}>
-                      <span style={styles.clarifiedBadge}>clarified</span>
-                      <span style={{ color: '#86efac' }}>{l.corrected}</span>
-                      <span style={styles.strikethrough} title={`Original: ${l.cleaned}`}>{' '}{l.cleaned}</span>
-                    </span>
-                  ) : (
+        {/* Transcript panels — shown when live or stopped */}
+        {(isLive || status === 'stopped' || status === 'error') && (
+          <div className="smc-grid" style={styles.grid}>
+            {/* ME panel */}
+            <div style={{ ...styles.panel, borderColor: '#22c55e' }}>
+              <div style={{ ...styles.panelHead, color: '#22c55e' }}>ME — microphone</div>
+              <div ref={meScrollRef} style={styles.transcript}>
+                {meLines.length === 0 && <span style={styles.muted}>Your speech will appear here…</span>}
+                {meLines.map((l, i) => (
+                  <div key={i} style={styles.line}>
+                    <span style={styles.ts}>{l.ts}</span>
                     <span style={{ flex: 1 }}>{l.cleaned}</span>
-                  )}
-                  {isLive && meetingIdRef.current && (
-                    <button
-                      className={`smc-flag-btn${l.flagged ? ' flagged' : ''}`}
-                      onClick={() => !l.flagged && flagItem(l.corrected || l.cleaned, 'others', l.ts, l.segmentId)}
-                      style={{
-                        ...styles.flagBtn,
-                        color: l.flagged ? '#f59e0b' : '#9aa0a6',
-                        cursor: l.flagged ? 'default' : 'pointer',
-                      }}
-                      title={l.flagged ? 'Flagged for follow-up' : 'Flag this for follow-up'}
-                    >
-                      {l.flagged ? '⚑' : '⚐'}
-                    </button>
-                  )}
-                </div>
-              ))}
+                    {l.raw !== l.cleaned && (
+                      <span style={styles.hint} title={l.raw}> [raw differs]</span>
+                    )}
+                    {isLive && meetingIdRef.current && (
+                      <button
+                        className={`smc-flag-btn${l.flagged ? ' flagged' : ''}`}
+                        onClick={() => !l.flagged && flagItem(l.cleaned, 'me', l.ts, null)}
+                        style={{
+                          ...styles.flagBtn,
+                          color: l.flagged ? '#f59e0b' : '#9aa0a6',
+                          cursor: l.flagged ? 'default' : 'pointer',
+                        }}
+                        title={l.flagged ? 'Flagged for follow-up' : 'Flag this for follow-up'}
+                      >
+                        {l.flagged ? '⚑' : '⚐'}
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* OTHERS panel */}
+            <div style={{ ...styles.panel, borderColor: '#38bdf8' }}>
+              <div style={{ ...styles.panelHead, color: '#38bdf8' }}>
+                OTHERS — system audio
+                {correctionCount > 0 && (
+                  <span style={styles.correctionCountBadge}>{correctionCount} clarified</span>
+                )}
+              </div>
+              <div ref={otScrollRef} style={styles.transcript}>
+                {othersLines.length === 0 && (
+                  <span style={styles.muted}>
+                    Others&apos; speech appears here via the desktop helper.<br />
+                    Share code <strong style={{ color: '#2AB49F' }}>{sessionCode || '…'}</strong> or use Copy link above.
+                  </span>
+                )}
+                {othersLines.map((l, i) => (
+                  <div key={i} style={styles.line}>
+                    <span style={styles.ts}>{l.ts}</span>
+                    {l.clarifiedByMe ? (
+                      <span style={{ flex: 1 }}>
+                        <span style={styles.clarifiedBadge}>clarified</span>
+                        <span style={{ color: '#86efac' }}>{l.corrected}</span>
+                        <span style={styles.strikethrough} title={`Original: ${l.cleaned}`}>{' '}{l.cleaned}</span>
+                      </span>
+                    ) : (
+                      <span style={{ flex: 1 }}>{l.cleaned}</span>
+                    )}
+                    {isLive && meetingIdRef.current && (
+                      <button
+                        className={`smc-flag-btn${l.flagged ? ' flagged' : ''}`}
+                        onClick={() => !l.flagged && flagItem(l.corrected || l.cleaned, 'others', l.ts, l.segmentId)}
+                        style={{
+                          ...styles.flagBtn,
+                          color: l.flagged ? '#f59e0b' : '#9aa0a6',
+                          cursor: l.flagged ? 'default' : 'pointer',
+                        }}
+                        title={l.flagged ? 'Flagged for follow-up' : 'Flag this for follow-up'}
+                      >
+                        {l.flagged ? '⚑' : '⚐'}
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* Coaching panel */}
         {(isLive || status === 'stopped') && (
@@ -867,7 +1178,7 @@ export default function SessionPage() {
           </div>
         )}
 
-        {/* Follow-up Tracker — two panels: Talking Points + References */}
+        {/* Follow-up Tracker */}
         {showFollowUp && (
           <div style={styles.followUpSection}>
             <div style={styles.followUpHeader}>
@@ -881,7 +1192,6 @@ export default function SessionPage() {
               </span>
             </div>
             <div className="smc-followup" style={styles.followUpGrid}>
-              {/* Left: Talking Points */}
               <div style={{ ...styles.followUpPanel, borderColor: '#1e4d2b' }}>
                 <div style={{ ...styles.followUpPanelHead, color: '#4ade80' }}>Talking Points</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -896,9 +1206,7 @@ export default function SessionPage() {
                     >
                       <div style={styles.tpNumber}>{idx + 1}</div>
                       <div style={{ flex: 1 }}>
-                        <div style={styles.tpQuote}>
-                          &ldquo;{item.text}&rdquo;
-                        </div>
+                        <div style={styles.tpQuote}>&ldquo;{item.text}&rdquo;</div>
                         <div style={styles.tpMeta}>
                           {item.speaker === 'others' ? 'OTHERS' : 'ME'} &middot; {item.ts}
                         </div>
@@ -923,7 +1231,6 @@ export default function SessionPage() {
                 </div>
               </div>
 
-              {/* Right: References */}
               <div style={{ ...styles.followUpPanel, borderColor: '#1e3a5f' }}>
                 <div style={{ ...styles.followUpPanelHead, color: '#60a5fa' }}>References</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -976,7 +1283,7 @@ export default function SessionPage() {
           Engine: {ENGINE_URL}&nbsp;&middot;&nbsp;WS:&nbsp;
           <span style={{ color: wsConnected ? '#22c55e' : '#9aa0a6' }}>{wsConnected ? 'connected' : 'disconnected'}</span>
           {isLive && <>&nbsp;&middot;&nbsp;<span style={{ color: '#2AB49F' }}>{MODE_LABEL[mode]}</span></>}
-          {meetingIdRef.current && <>&nbsp;&middot;&nbsp;<span style={{ color: '#9aa0a6' }}>recording</span></>}
+          {meetingId && <>&nbsp;&middot;&nbsp;<span style={{ color: '#9aa0a6' }}>recording</span></>}
         </div>
       </div>
     </>
@@ -1005,10 +1312,26 @@ const styles = {
   dot: { width: 9, height: 9, borderRadius: '50%', display: 'inline-block', flexShrink: 0 },
   statusText: { fontSize: 13, color: '#9aa0a6', whiteSpace: 'nowrap' },
   btn: { border: 'none', borderRadius: 8, padding: '8px 18px', fontSize: 13, fontWeight: 600, color: '#fff', cursor: 'pointer' },
-  objectiveRow: { display: 'flex', flexDirection: 'column', gap: 4 },
-  objectiveInput: { background: '#1a1d24', border: '1px solid #2a2f37', color: '#e6e8eb', borderRadius: 8, padding: '8px 12px', fontSize: 13, width: '100%', outline: 'none' },
+  textInput: { background: '#1a1d24', border: '1px solid #2a2f37', color: '#e6e8eb', borderRadius: 8, padding: '8px 12px', fontSize: 13, width: '100%', outline: 'none' },
   warnBox: { background: '#1c1007', border: '1px solid #92400e', borderRadius: 8, padding: '8px 12px', fontSize: 13, color: '#fcd34d' },
   errorBox: { background: '#2d1010', border: '1px solid #7f1d1d', borderRadius: 8, padding: '8px 12px', fontSize: 13, color: '#fca5a5' },
+  // Preparation panel
+  prepPanel: { background: '#0d1421', border: '1px solid #1e3a5f', borderRadius: 12, overflow: 'hidden' },
+  prepHeader: {
+    display: 'flex', alignItems: 'center', gap: 12,
+    padding: '10px 16px', borderBottom: '1px solid #1e3a5f',
+  },
+  prepTitle: { fontSize: 13, fontWeight: 600, color: '#38bdf8' },
+  prepBody: { display: 'flex', flexDirection: 'column', gap: 14, padding: 16 },
+  fieldRow: { display: 'flex', flexDirection: 'column', gap: 4 },
+  uploadError: { background: '#2d1010', border: '1px solid #7f1d1d', borderRadius: 6, padding: '6px 10px', fontSize: 12, color: '#fca5a5', marginTop: 4 },
+  docList: { display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 },
+  docItem: { display: 'flex', alignItems: 'center', gap: 8, background: '#111827', border: '1px solid #1f2937', borderRadius: 6, padding: '6px 10px' },
+  docIcon: { fontSize: 14, flexShrink: 0 },
+  docName: { fontSize: 12, color: '#e6e8eb', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  docSize: { fontSize: 10, color: '#6b7280', flexShrink: 0 },
+  docRemove: { background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: '0 2px', flexShrink: 0 },
+  // Transcript grid
   grid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, flex: 1 },
   panel: { background: '#171a21', border: '1px solid', borderRadius: 12, padding: 14, display: 'flex', flexDirection: 'column', minHeight: 300 },
   panelHead: { fontSize: 13, fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 },
@@ -1086,7 +1409,7 @@ const styles = {
   tpWorking: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#9aa0a6', fontStyle: 'italic' },
   workingDot: {
     width: 7, height: 7, borderRadius: '50%', background: '#f59e0b',
-    display: 'inline-block', animation: 'pulse 1.2s ease-in-out infinite',
+    display: 'inline-block',
   },
   tpAssist: { fontSize: 13, color: '#86efac', lineHeight: 1.6, whiteSpace: 'pre-wrap', marginBottom: 8 },
   addressBtn: {

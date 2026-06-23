@@ -17,3 +17,5 @@ Thumbs.db
 # real, sensitive packs stay local; only the example pack ships
 packs/*
 !packs/example-pack/
+.vercel
+.env*

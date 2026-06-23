@@ -55,6 +55,13 @@ export default async function MeetingDetailPage({ params }) {
     ORDER BY ts
   `;
 
+  const refDocs = await sql`
+    SELECT id, filename, added_at, length(content_text) AS size_bytes
+    FROM session_reference_docs
+    WHERE meeting_id = ${id}
+    ORDER BY added_at
+  `;
+
   // Coaching uses corrected OTHERS text where available
   const me = segments.filter(s => s.speaker === 'me').map(s => s.cleaned);
   const others = segments
@@ -162,6 +169,24 @@ export default async function MeetingDetailPage({ params }) {
                 <div style={{ fontSize: 13, color: '#fbbf24' }}>{coaching.alignment}</div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Reference documents */}
+      {refDocs.length > 0 && (
+        <div style={{ background: '#0d1421', border: '1px solid #1e3a5f', borderRadius: 12, padding: '12px 16px' }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: '#38bdf8', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            Reference Documents ({refDocs.length})
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {refDocs.map(doc => (
+              <div key={doc.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#9aa0a6' }}>
+                <span>📄</span>
+                <span style={{ flex: 1 }}>{doc.filename}</span>
+                <span style={{ fontSize: 10, color: '#4b5563' }}>{Math.ceil(doc.size_bytes / 1024)} KB</span>
+              </div>
+            ))}
           </div>
         </div>
       )}

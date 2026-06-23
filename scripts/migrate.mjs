@@ -50,6 +50,15 @@ try {
     addressed_at   timestamptz
   )`;
   await sql`CREATE INDEX IF NOT EXISTS idx_flagged_meeting ON flagged_items (meeting_id, ts)`;
+  // Session 9 P2: reference documents uploaded per session (pre-meeting prep)
+  await sql`CREATE TABLE IF NOT EXISTS session_reference_docs (
+    id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    meeting_id   uuid NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    filename     text NOT NULL,
+    content_text text NOT NULL,
+    added_at     timestamptz NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_ref_docs_meeting ON session_reference_docs (meeting_id, added_at)`;
   console.log('[migrate] ok');
 } catch (e) {
   // Permission denied = local env has a read-only DATABASE_URL.

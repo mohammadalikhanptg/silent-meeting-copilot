@@ -1,16 +1,9 @@
 import { redirect } from 'next/navigation';
 import { getSessionPayload } from '../lib/auth';
 import { getSql } from '../lib/db';
+import NewSessionButton from './NewSessionButton';
 
 export const dynamic = 'force-dynamic';
-
-function formatDuration(started, ended) {
-  if (!ended) return 'In progress';
-  const ms = new Date(ended) - new Date(started);
-  const mins = Math.floor(ms / 60000);
-  const secs = Math.floor((ms % 60000) / 1000);
-  return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-}
 
 function formatDate(ts) {
   return new Date(ts).toLocaleString('en-GB', {
@@ -19,7 +12,37 @@ function formatDate(ts) {
   });
 }
 
-export default async function MeetingsPage() {
+function formatDuration(started, ended) {
+  if (!ended) return null;
+  const ms = new Date(ended) - new Date(started);
+  const mins = Math.floor(ms / 60000);
+  const secs = Math.floor((ms % 60000) / 1000);
+  return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+}
+
+function deriveStatus(m) {
+  if (m.ended_at) return 'completed';
+  if (m.segment_count > 0) return 'in-progress';
+  return 'prepared';
+}
+
+const STATUS_LABEL = {
+  completed: 'Completed',
+  'in-progress': 'In progress',
+  prepared: 'Prepared',
+};
+const STATUS_COLOR = {
+  completed: '#22c55e',
+  'in-progress': '#facc15',
+  prepared: '#38bdf8',
+};
+const STATUS_BG = {
+  completed: '#052e16',
+  'in-progress': '#1c1a07',
+  prepared: '#0c1f33',
+};
+
+export default async function SessionsPage() {
   const session = await getSessionPayload();
   if (!session) redirect('/login');
 
@@ -35,41 +58,76 @@ export default async function MeetingsPage() {
     LIMIT 50
   `;
 
+  const btnStyle = {
+    background: '#2AB49F',
+    color: '#fff',
+    border: 'none',
+    padding: '10px 20px',
+    borderRadius: 8,
+    fontSize: 14,
+    fontWeight: 700,
+    cursor: 'pointer',
+    letterSpacing: '0.02em',
+  };
+
   return (
     <main style={styles.root}>
       <div style={styles.header}>
         <div>
-          <h1 style={styles.title}>Past Meetings</h1>
+          <h1 style={styles.title}>Sessions</h1>
           <p style={styles.sub}>Signed in as {session.email}</p>
         </div>
-        <div style={{ display: 'flex', gap: 12 }}>
-          <a href="/" style={styles.link}>&larr; Home</a>
-          <a href="/session" style={styles.btn}>New Session</a>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <a href="/profile" style={styles.navLink}>Profile</a>
+          <NewSessionButton style={btnStyle} />
         </div>
       </div>
 
       {meetings.length === 0 ? (
         <div style={styles.empty}>
-          No meetings recorded yet. Start a session to begin recording.
+          <div style={styles.emptyIcon}>🎙</div>
+          <div style={styles.emptyTitle}>No sessions yet</div>
+          <div style={styles.emptySub}>
+            Create your first session to start real-time coaching, transcription, and follow-up tracking.
+          </div>
+          <NewSessionButton style={{ ...btnStyle, marginTop: 16 }} />
         </div>
       ) : (
         <div style={styles.list}>
-          {meetings.map(m => (
-            <a key={m.id} href={`/meetings/${m.id}`} style={styles.card}>
-              <div style={styles.cardTop}>
-                <span style={styles.cardTitle}>{m.title || 'Untitled session'}</span>
-                <span style={styles.cardMeta}>{formatDate(m.started_at)}</span>
-              </div>
-              {m.objective && (
-                <div style={styles.cardObjective}>{m.objective}</div>
-              )}
-              <div style={styles.cardFooter}>
-                <span style={styles.pill}>{m.language_mode || 'english'}</span>
-                <span style={styles.cardStat}>{m.segment_count} segments</span>
-                <span style={styles.cardStat}>{formatDuration(m.started_at, m.ended_at)}</span>
-              </div>
-            </a>
-          ))}
+          {meetings.map(m => {
+            const status = deriveStatus(m);
+            const href = status === 'completed' ? `/meetings/${m.id}` : `/session?m=${m.id}`;
+            const duration = formatDuration(m.started_at, m.ended_at);
+            return (
+              <a key={m.id} href={href} style={styles.card}>
+                <div style={styles.cardTop}>
+                  <span style={styles.cardTitle}>{m.title || 'Untitled session'}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{
+                      ...styles.statusBadge,
+                      color: STATUS_COLOR[status],
+                      background: STATUS_BG[status],
+                      border: `1px solid ${STATUS_COLOR[status]}33`,
+                    }}>
+                      {STATUS_LABEL[status]}
+                    </span>
+                    <span style={styles.cardMeta}>{formatDate(m.started_at)}</span>
+                  </div>
+                </div>
+                {m.objective && (
+                  <div style={styles.cardObjective}>{m.objective}</div>
+                )}
+                <div style={styles.cardFooter}>
+                  <span style={styles.pill}>{m.language_mode || 'english'}</span>
+                  <span style={styles.cardStat}>{m.segment_count} segments</span>
+                  {duration && <span style={styles.cardStat}>{duration}</span>}
+                  <span style={{ ...styles.cardStat, marginLeft: 'auto', color: '#38bdf8' }}>
+                    {status === 'completed' ? 'View review →' : 'Open →'}
+                  </span>
+                </div>
+              </a>
+            );
+          })}
         </div>
       )}
     </main>
@@ -90,28 +148,25 @@ const styles = {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 24,
+    marginBottom: 28,
     gap: 12,
     flexWrap: 'wrap',
   },
-  title: { margin: 0, fontSize: 22, fontWeight: 700 },
+  title: { margin: 0, fontSize: 24, fontWeight: 700 },
   sub: { margin: '4px 0 0', fontSize: 12, color: '#6b7280' },
-  link: { fontSize: 13, color: '#9aa0a6', textDecoration: 'none', alignSelf: 'center' },
-  btn: {
-    background: '#2AB49F',
-    color: '#fff',
-    padding: '8px 16px',
-    borderRadius: 8,
-    fontSize: 13,
-    fontWeight: 600,
-    textDecoration: 'none',
-  },
+  navLink: { fontSize: 13, color: '#a78bfa', textDecoration: 'none', alignSelf: 'center' },
   empty: {
-    color: '#6b7280',
-    fontSize: 14,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 320,
     textAlign: 'center',
-    marginTop: 48,
+    gap: 8,
   },
+  emptyIcon: { fontSize: 48, marginBottom: 8 },
+  emptyTitle: { fontSize: 18, fontWeight: 600, color: '#e6e8eb' },
+  emptySub: { fontSize: 14, color: '#6b7280', maxWidth: 360, lineHeight: 1.6 },
   list: {
     display: 'flex',
     flexDirection: 'column',
@@ -133,6 +188,7 @@ const styles = {
     alignItems: 'baseline',
     gap: 8,
     marginBottom: 4,
+    flexWrap: 'wrap',
   },
   cardTitle: { fontSize: 15, fontWeight: 600, color: '#e6e8eb' },
   cardMeta: { fontSize: 11, color: '#6b7280', whiteSpace: 'nowrap' },
@@ -147,6 +203,16 @@ const styles = {
     gap: 10,
     alignItems: 'center',
     marginTop: 6,
+    flexWrap: 'wrap',
+  },
+  statusBadge: {
+    fontSize: 10,
+    padding: '2px 8px',
+    borderRadius: 99,
+    fontWeight: 700,
+    textTransform: 'uppercase',
+    letterSpacing: '0.04em',
+    whiteSpace: 'nowrap',
   },
   pill: {
     fontSize: 10,
