@@ -71,6 +71,16 @@ try {
   await sql`CREATE INDEX IF NOT EXISTS idx_profile_docs_user ON profile_docs (user_email, added_at)`;
   // Auth hardening 1: track last_seen per session row for effective revocation
   await sql`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_seen timestamptz`;
+  // Auth hardening 2: auth_attempts — rate limiting + TOTP lockout
+  await sql`CREATE TABLE IF NOT EXISTS auth_attempts (
+    id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    type       text NOT NULL,
+    key        text NOT NULL,
+    success    boolean NOT NULL DEFAULT false,
+    ip         text,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_auth_attempts_key ON auth_attempts (type, key, created_at)`;
   console.log('[migrate] ok');
 } catch (e) {
   // Permission denied = local env has a read-only DATABASE_URL.
