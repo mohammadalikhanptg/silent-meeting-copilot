@@ -27,6 +27,9 @@ let rafId = null;
 let engineUrl = '';
 let sessionId = '';
 let pairingKey = ''; // loaded from safeStorage on init, sent as ?key= on WS connect
+let micSegTimer = null;
+let otSegTimer = null;
+let capturing = false;
 
 // Short human-readable code matching the browser format: 3 letters + 4 digits
 function generateShortCode() {
@@ -65,7 +68,7 @@ function encodeFrame(speaker, arrayBuffer) {
 
 function openWebSocket() {
   return new Promise((resolve, reject) => {
-    const qs = new URLSearchParams({ mode: 'auto' });
+    const qs = new URLSearchParams({ mode: 'auto', role: 'helper' });
     if (pairingKey) {
       qs.set('key', pairingKey);
     }
@@ -186,29 +189,35 @@ async function start() {
       ? 'audio/webm;codecs=opus'
       : 'audio/ogg;codecs=opus';
 
-    // MediaRecorder for ME channel
-    micRecorder = new MediaRecorder(micStream, { mimeType: meMime });
-    micRecorder.ondataavailable = async (evt) => {
-      if (!evt.data || evt.data.size < 100) return;
-      const buf = await evt.data.arrayBuffer();
-      if (ws?.readyState === WebSocket.OPEN) {
-        ws.send(encodeFrame('me', buf));
-      }
-    };
-    micRecorder.start(CHUNK_MS);
-    log(`ME recorder started (${meMime}, ${CHUNK_MS}ms chunks).`);
+    capturing = true;
 
-    // MediaRecorder for OTHERS channel (if loopback available)
-    if (othersStream.getAudioTracks().length > 0) {
-      othersRecorder = new MediaRecorder(othersStream, { mimeType: meMime });
-      othersRecorder.ondataavailable = async (evt) => {
-        if (!evt.data || evt.data.size < 100) return;
-        const buf = await evt.data.arrayBuffer();
-        if (ws?.readyState === WebSocket.OPEN) {
-          ws.send(encodeFrame('others', buf));
+    // Cycle each recorder so every segment is a COMPLETE, self-contained file.
+    // Continuous timeslice mode only writes the container header into the first
+    // chunk, leaving later chunks undecodable by the engine — that was why the
+    // OTHERS stream barely produced any transcripts.
+    function cycleChannel(stream, speaker, assignRecorder, assignTimer) {
+      if (!capturing) return;
+      let parts = [];
+      const rec = new MediaRecorder(stream, { mimeType: meMime });
+      assignRecorder(rec);
+      rec.ondataavailable = (e) => { if (e.data && e.data.size) parts.push(e.data); };
+      rec.onstop = async () => {
+        const blob = new Blob(parts, { type: meMime });
+        parts = [];
+        if (blob.size > 1200 && ws?.readyState === WebSocket.OPEN) {
+          try { ws.send(encodeFrame(speaker, await blob.arrayBuffer())); } catch (_) {}
         }
+        if (capturing) cycleChannel(stream, speaker, assignRecorder, assignTimer);
       };
-      othersRecorder.start(CHUNK_MS);
+      rec.start();
+      assignTimer(setTimeout(() => { try { rec.stop(); } catch (_) {} }, CHUNK_MS));
+    }
+
+    cycleChannel(micStream, 'me', (r) => { micRecorder = r; }, (t) => { micSegTimer = t; });
+    log(`ME recorder started (${meMime}, ${CHUNK_MS}ms segments).`);
+
+    if (othersStream.getAudioTracks().length > 0) {
+      cycleChannel(othersStream, 'others', (r) => { othersRecorder = r; }, (t) => { otSegTimer = t; });
       log('OTHERS recorder started.');
     }
 
@@ -222,6 +231,9 @@ async function start() {
 }
 
 function stop() {
+  capturing = false;
+  if (micSegTimer) { clearTimeout(micSegTimer); micSegTimer = null; }
+  if (otSegTimer) { clearTimeout(otSegTimer); otSegTimer = null; }
   if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
 
   micRecorder?.stop();

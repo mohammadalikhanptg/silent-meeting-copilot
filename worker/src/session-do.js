@@ -4,12 +4,11 @@ export class SessionDO {
   constructor(state, env) {
     this.state = state;
     this.env = env;
-    this.sockets = new Set();
-    // Accumulate audio bytes per speaker until flush threshold
-    this.buffers = { me: [], others: [] };
-    this.FLUSH_BYTES = 64 * 1024; // flush after ~64 KB of audio per channel
-    this.lang = null; // language hint set on WS connect or via config message
-    this.mode = 'auto'; // per-session provider mode: 'auto' | 'english' | 'hindi-urdu'
+    // Fallback only. The authoritative per-connection lang/mode/role lives in the
+    // socket attachment (serializeAttachment), which survives DO hibernation —
+    // unlike instance fields, which are wiped when the DO is evicted.
+    this.lang = null;
+    this.mode = 'auto';
   }
 
   async fetch(request) {
@@ -20,92 +19,92 @@ export class SessionDO {
   }
 
   async _handleWebSocket(request) {
-    // Accept optional ?lang= and ?mode= from connecting client
     const url = new URL(request.url);
     const lang = url.searchParams.get('lang') || null;
     const mode = url.searchParams.get('mode') || 'auto';
-    if (lang) this.lang = lang;
-    this.mode = mode;
+    const role = url.searchParams.get('role') === 'helper' ? 'helper' : 'browser';
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.state.acceptWebSocket(server);
-    this.sockets.add(server);
+    // Hibernation-safe per-socket state.
+    server.serializeAttachment({ lang, mode, role });
+    // Let connected browsers know whether a helper is now feeding this session,
+    // so they can suppress their own mic capture (see double-capture guard below).
+    this._broadcastHelperStatus();
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  // Called by the Workers runtime when a message arrives on any accepted WebSocket.
+  _helperConnected() {
+    for (const ws of this.state.getWebSockets()) {
+      const att = ws.deserializeAttachment();
+      if (att && att.role === 'helper') return true;
+    }
+    return false;
+  }
+
+  _broadcastHelperStatus() {
+    this._broadcast({ type: 'helper_status', connected: this._helperConnected() });
+  }
+
+  // Called by the Workers runtime for each message on any accepted WebSocket.
   async webSocketMessage(ws, message) {
     try {
-      // Text frames are control messages; binary frames are audio chunks.
+      const att = ws.deserializeAttachment() || {};
+      const lang = att.lang || null;
+      const mode = att.mode || 'auto';
+      const role = att.role || 'browser';
+
+      // Text frames are control messages.
       if (typeof message === 'string') {
         const ctrl = JSON.parse(message);
-        if (ctrl.type === 'flush') {
-          await this._flushChannel(ctrl.speaker || 'me');
-        } else if (ctrl.type === 'config') {
-          if (ctrl.lang !== undefined) this.lang = ctrl.lang || null;
-          if (ctrl.mode !== undefined) this.mode = ctrl.mode || 'auto';
+        if (ctrl.type === 'config') {
+          const next = { ...att };
+          if (ctrl.lang !== undefined) next.lang = ctrl.lang || null;
+          if (ctrl.mode !== undefined) next.mode = ctrl.mode || 'auto';
+          ws.serializeAttachment(next);
         }
         return;
       }
 
-      // Binary: first byte encodes speaker (0 = me, 1 = others)
+      // Binary frame: byte 0 is the speaker (0 = me, 1 = others); the remainder is a
+      // COMPLETE, self-contained audio file (the browser/helper now cycle the recorder
+      // so every segment has its own container header and decodes standalone).
       const bytes = new Uint8Array(message);
       if (bytes.length < 2) return;
       const speaker = bytes[0] === 1 ? 'others' : 'me';
+
+      // Double-capture guard: when a desktop helper is feeding this session it is the
+      // authoritative ME source. Drop browser-origin ME audio so the operator is not
+      // transcribed twice. (Server-side, so it holds even if the browser keeps sending.)
+      if (speaker === 'me' && role === 'browser' && this._helperConnected()) return;
+
       const audio = bytes.slice(1);
-      this.buffers[speaker].push(audio);
-      const totalBytes = this.buffers[speaker].reduce((s, b) => s + b.length, 0);
-      if (totalBytes >= this.FLUSH_BYTES) {
-        await this._flushChannel(speaker);
+      const result = await transcribeAndClean(audio, this.env, lang, mode);
+      if (result.error === 'deepgram_unavailable') {
+        // Notify client explicitly — do NOT silently fall back to English.
+        this._broadcast({
+          type: 'error',
+          code: 'deepgram_unavailable',
+          message:
+            'Hindi/Urdu mode requires a Deepgram API key that has not been configured on this server. ' +
+            'Please switch to English mode or contact the administrator.',
+        });
+      } else if (result.raw) {
+        this._broadcast({ type: 'transcript', speaker, ...result });
       }
     } catch (err) {
       this._broadcast({ type: 'error', message: String(err) });
     }
   }
 
-  async webSocketClose(ws) {
-    this.sockets.delete(ws);
-    // Flush remaining buffers on close
-    for (const speaker of ['me', 'others']) {
-      if (this.buffers[speaker].length > 0) {
-        await this._flushChannel(speaker);
-      }
-    }
+  async webSocketClose() {
+    // A socket left; recompute helper presence for the remaining browsers.
+    try { this._broadcastHelperStatus(); } catch (_) {}
   }
 
   async webSocketError(ws, error) {
-    this.sockets.delete(ws);
     console.error('WebSocket error:', error);
-  }
-
-  async _flushChannel(speaker) {
-    const chunks = this.buffers[speaker];
-    if (chunks.length === 0) return;
-    this.buffers[speaker] = [];
-
-    // Concatenate chunks into a single Uint8Array
-    const totalLen = chunks.reduce((s, b) => s + b.length, 0);
-    const combined = new Uint8Array(totalLen);
-    let offset = 0;
-    for (const chunk of chunks) {
-      combined.set(chunk, offset);
-      offset += chunk.length;
-    }
-
-    const result = await transcribeAndClean(combined, this.env, this.lang, this.mode);
-    if (result.error === 'deepgram_unavailable') {
-      // Notify client explicitly — do NOT silently fall back to English
-      this._broadcast({
-        type: 'error',
-        code: 'deepgram_unavailable',
-        message:
-          'Hindi/Urdu mode requires a Deepgram API key that has not been configured on this server. ' +
-          'Please switch to English mode or contact the administrator.',
-      });
-    } else if (result.raw) {
-      this._broadcast({ type: 'transcript', speaker, ...result });
-    }
   }
 
   _broadcast(msg) {

@@ -70,6 +70,8 @@ export default function SessionPage() {
   const profileRef = useRef(null);
   const seenAssistKeys = useRef(new Set());
   const flaggedItemsRef = useRef([]);
+  const segmentTimer = useRef(null);
+  const suppressMicRef = useRef(false); // true when a desktop helper is the authoritative ME source
 
   useEffect(() => { meLinesRef.current = meLines; }, [meLines]);
   useEffect(() => { othersLinesRef.current = othersLines; }, [othersLines]);
@@ -542,7 +544,7 @@ export default function SessionPage() {
           try { wsRef.current.close(); } catch (_) {}
         }
 
-        const qs = new URLSearchParams({ mode: sessionMode });
+        const qs = new URLSearchParams({ mode: sessionMode, role: 'browser' });
         const langHint = MODE_LANG[sessionMode];
         if (langHint) qs.set('lang', langHint);
         const wsUrl = ENGINE_URL.replace(/^http/, 'ws') + `/session/${code}/ws?${qs}`;
@@ -624,6 +626,8 @@ export default function SessionPage() {
                 setError(
                   'Hindi / Urdu mode is not enabled on this server. Stop, switch to English, and try again.'
                 );
+              } else if (msg.type === 'helper_status') {
+                suppressMicRef.current = !!msg.connected;
               }
             } catch (_) {}
           };
@@ -663,17 +667,35 @@ export default function SessionPage() {
       streamRef.current = stream;
       const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
         ? 'audio/webm;codecs=opus' : 'audio/ogg;codecs=opus';
-      const recorder = new MediaRecorder(stream, { mimeType });
-      recorderRef.current = recorder;
-      recorder.ondataavailable = async (evt) => {
-        if (!evt.data || evt.data.size < 100) return;
-        const buf = await evt.data.arrayBuffer();
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(encodeChunk('me', buf));
-        }
-      };
-      recorder.start(CHUNK_MS);
+
+      // Send each segment as a COMPLETE, self-contained file. In continuous
+      // timeslice mode MediaRecorder only writes the container header into the
+      // first chunk, so later chunks cannot be decoded standalone by the engine.
+      // Cycling stop/start makes every segment its own valid file.
       updateStatus('live');
+      const startSegment = () => {
+        if (intentionalStop.current || liveStatus.current !== 'live') return;
+        if (suppressMicRef.current) {
+          // A desktop helper owns the mic; skip and re-check shortly.
+          segmentTimer.current = setTimeout(startSegment, 1000);
+          return;
+        }
+        let parts = [];
+        const rec = new MediaRecorder(stream, { mimeType });
+        recorderRef.current = rec;
+        rec.ondataavailable = (e) => { if (e.data && e.data.size) parts.push(e.data); };
+        rec.onstop = async () => {
+          const blob = new Blob(parts, { type: mimeType });
+          parts = [];
+          if (blob.size > 1200 && wsRef.current?.readyState === WebSocket.OPEN && !suppressMicRef.current) {
+            try { wsRef.current.send(encodeChunk('me', await blob.arrayBuffer())); } catch (_) {}
+          }
+          startSegment();
+        };
+        rec.start();
+        segmentTimer.current = setTimeout(() => { try { rec.stop(); } catch (_) {} }, CHUNK_MS);
+      };
+      startSegment();
     } catch (err) {
       setError(String(err));
       updateStatus('error');
@@ -685,6 +707,7 @@ export default function SessionPage() {
 
   const stopSession = useCallback(() => {
     intentionalStop.current = true;
+    if (segmentTimer.current) { clearTimeout(segmentTimer.current); segmentTimer.current = null; }
     if (reconnectTimer.current) { clearTimeout(reconnectTimer.current); reconnectTimer.current = null; }
     recorderRef.current?.stop();
     streamRef.current?.getTracks().forEach(t => t.stop());
