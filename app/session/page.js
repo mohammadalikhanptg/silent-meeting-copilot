@@ -705,9 +705,7 @@ export default function SessionPage() {
 
   const copyLink = useCallback(() => {
     if (!sessionCode) return;
-    const u = new URL(window.location.href);
-    u.searchParams.set('s', sessionCode);
-    navigator.clipboard.writeText(u.toString()).then(() => {
+    navigator.clipboard.writeText(sessionCode).then(() => {
       setCopied(true); setTimeout(() => setCopied(false), 2000);
     }).catch(() => {});
   }, [sessionCode]);
@@ -756,9 +754,9 @@ export default function SessionPage() {
             <button
               onClick={copyLink}
               style={{ ...styles.smallBtn, background: copied ? '#166534' : 'var(--bg-raised)' }}
-              title="Copy shareable session link"
+              title="Copy the session code to paste into the desktop helper"
             >
-              {copied ? '✓ Copied' : 'Copy link'}
+              {copied ? '✓ Copied' : 'Copy code'}
             </button>
           </div>
 
@@ -995,7 +993,7 @@ export default function SessionPage() {
                 {othersLines.length === 0 && (
                   <span style={styles.muted}>
                     Others&apos; speech appears here via the desktop helper.<br />
-                    Share code <strong style={{ color: '#2AB49F' }}>{sessionCode || '…'}</strong> or use Copy link above.
+                    Share code <strong style={{ color: '#2AB49F' }}>{sessionCode || '…'}</strong> or use Copy code above.
                   </span>
                 )}
                 {othersLines.map((l, i) => (
