@@ -1,13 +1,228 @@
 # Silent Meeting Copilot — Overnight Build Progress
 
-**Date:** 2026-06-23 (Session 13 updates in bold)
-**Session:** Autonomous overnight build × 13
+**Date:** 2026-06-23 (Session 14 updates in bold)
+**Session:** Autonomous overnight build × 14
 
 ---
 
 ## Summary
 
-All auth hardening (Session 11), multi-user/admin layer (Session 12), and full visual redesign (Session 13) are complete. The app now has a glassmorphic dark/light design system with aurora backgrounds on auth pages, high-contrast live session panels, Inter font, and a persisted sun/moon theme toggle across all surfaces.
+All auth hardening (Session 11), multi-user/admin layer (Session 12), full visual redesign (Session 13), and helper distribution + per-user pairing (Session 14) are complete. Users can now download the desktop helper from their profile page and bind it to their account via a per-user HMAC-signed pairing key. The engine validates every helper connection against the key before accepting audio frames.
+
+---
+
+## **Session 14 — Helper Distribution + Per-User Pairing (P1–P5) ✅ COMPLETE**
+
+### **P1 — Per-user pairing key**
+
+**Key format:** `smc1_<base64url({u:email,v:version})>.<base64url(HMAC-SHA256)>`
+- Payload encodes email + `helper_key_version` (integer per user in DB)
+- HMAC signed with `HELPER_SIGNING_SECRET` (set on Vercel production + Cloudflare worker secret)
+- Visible `smc1_` prefix for easy identification
+- Rotation: POST `/api/helper-key` increments `helper_key_version`; old keys immediately invalid
+
+**Schema (appended to `scripts/migrate.mjs`):**
+```sql
+ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS helper_key_version INT NOT NULL DEFAULT 1;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS session_code text;
+CREATE INDEX IF NOT EXISTS idx_meetings_session_code ON meetings (session_code);
+```
+
+**New auth.js helpers:** `generateHelperKey(email, version)`, `decodeHelperKey(key)`, `verifyHelperKeyHmac(key)`
+
+**New API routes:**
+| Route | Method | Purpose |
+|-------|--------|---------|
+| `/api/helper-key` | GET | Return current pairing key for logged-in user |
+| `/api/helper-key` | POST | Rotate key (bump version, return new key) |
+| `/api/internal/validate-helper-key` | GET | Internal: worker calls this to validate a key (Bearer auth) |
+
+### **P2 — Engine validation (the no-leak guarantee)**
+
+**Worker WS connect flow:**
+1. Helper opens `wss://smc-engine/session/{code}/ws?key=smc1_xxx.yyy`
+2. `worker/src/index.js` intercepts `?key=` before routing to the Durable Object
+3. Calls `APP_BASE_URL/api/internal/validate-helper-key?key=...&session_code=...` with `Authorization: Bearer HELPER_SIGNING_SECRET`
+4. Internal endpoint:
+   - Verifies HMAC (rejects bad signatures immediately)
+   - Checks `auth_users.helper_key_version == key.v` (rejects stale/rotated keys)
+   - If `session_code` provided: checks `meetings WHERE session_code=X AND user_email=email` (rejects if user doesn't own session)
+5. On failure: closes WS with code 4401 + `{type:"auth_error", reason:...}` frame
+6. On success: attaches `_authed_email` to request before routing to DO
+
+**Middleware update:** `/api/internal/` added to PUBLIC paths so the worker can call it with Bearer token (no session cookie).
+
+**Session registration:** `POST /api/meetings` and `PATCH /api/meetings/[id]` now accept `session_code`; session/page.js sends it on Start Session so ownership is recorded in DB.
+
+### **P3 — In-profile download card**
+
+New "Desktop helper" section on `/profile` page:
+- **OS auto-detection** (`detectOS()` reads `navigator.platform`/`userAgent`)
+- **Primary download** button for detected OS (Mac .dmg / Windows .exe)
+- **Secondary link** for the other platform
+- **Pairing key display** — monospace, `user-select: all`, with Copy button
+- **Rotate key** button — confirms before rotating, updates display immediately after
+- **Setup steps** inline (4 steps: download → copy key → paste in helper → start)
+- **Unsigned installer notice** (right-click → Open on Mac, SmartScreen on Windows)
+
+**Download proxy (`/api/downloads/[platform]`):**
+- Auth-gated: unauthenticated requests redirect to `/login`
+- Redirects to GitHub Releases at `{HELPER_DOWNLOAD_BASE_URL}/{file}` (env-overridable)
+- Platforms: `mac` (SMC-Helper.dmg), `mac-zip` (SMC-Helper-mac.zip), `win` (SMC-Helper-Setup.exe)
+- Binaries are served from GitHub Release tag `helper-latest` published by CI
+
+### **P4 — Helper app finalised**
+
+**`helper/package.json`** — added Mac build targets:
+```json
+"mac": {
+  "target": ["dmg", "zip"],
+  "identity": null,
+  "category": "public.app-category.productivity"
+}
+```
+Scripts: `dist:mac`, `dist:win`, `dist` (both)
+
+**`helper/index.html`** — new pairing key section above session code:
+- `input[type=password]` for the key (masked by default)
+- "Save" button with "✓ saved" badge after success
+- Help text explaining where to get the key
+
+**`helper/renderer.js`** — pairing key lifecycle:
+- On init: `window.smc.loadPairingKey()` restores key from safeStorage; log shows if key found
+- "Save" button: validates prefix, calls `window.smc.savePairingKey(val)`, updates in-memory `pairingKey`
+- On WS open: key appended as `?key=smc1_xxx.yyy` in the URL
+- Key redacted from log output (shown as `[key]`)
+- Auth error frame `{type:"auth_error"}` shows user-friendly message
+- WS close 4401 shows "(Auth failed — check pairing key)" in log
+
+**`helper/main.js`** — safeStorage IPC:
+- `save-pairing-key`: encrypts via `safeStorage.encryptString()`, falls back to in-memory if encryption unavailable
+- `load-pairing-key`: decrypts on load; returns empty string if not set
+
+**`helper/preload.js`** — exposes `savePairingKey` and `loadPairingKey` via context bridge
+
+**`helper/README.md`** — updated: pairing key setup, session pairing flow, troubleshooting, cross-platform
+
+**`.github/workflows/smc-helper.yml`** — CI builds Mac and Windows on push to main when `helper/**` changes:
+- Matrix: `windows-latest` (NSIS .exe) + `macos-latest` (.dmg + .zip)
+- Publishes to GitHub Release `helper-latest` via `softprops/action-gh-release@v2`
+- `CSC_IDENTITY_AUTO_DISCOVERY=false` — unsigned builds (no code signing cert needed)
+
+### **P5 — Tests**
+
+```
+node scripts/test-helper-pairing.mjs
+
+Test 1: Key generation — format and structure
+  ✅ key is a string
+  ✅ key starts with smc1_
+  ✅ key contains a dot separator
+  ✅ decoded email matches
+  ✅ decoded version matches
+
+Test 2: HMAC verification — valid key passes
+  ✅ valid key verifies
+  ✅ verified email is correct
+  ✅ verified version is correct
+
+Test 3: HMAC verification — tampered key fails
+  ✅ tampered sig rejected
+  ✅ tampered payload (email swap) rejected
+
+Test 4: Cross-user isolation — userA key cannot impersonate userB
+  ✅ hybrid key (B payload + A sig) rejected
+
+Test 5: Version mismatch detection
+  ✅ v1 key decodes as version 1
+  ✅ v2 key decodes as version 2
+  ✅ v1 key rejected when current version is 2
+  ✅ v2 key accepted when current version is 2
+
+Test 6: Invalid key formats
+  ✅ empty string → null  ✅ null → null  ✅ wrong prefix → null
+  ✅ missing dot → null   ✅ verify null → null  ✅ verify empty → null
+
+Test 7: Wrong secret → HMAC fails
+  ✅ key signed with wrong secret rejected
+
+Test 8-13: Route structure checks (source-level)
+  ✅ internal endpoint checks Authorization, HMAC, version, session_code
+  ✅ worker reads ?key, calls validateHelperKey, closes 4401 on failure
+  ✅ helper-key GET queries DB, POST increments version
+  ✅ migrate adds helper_key_version DEFAULT 1, session_code column + index
+  ✅ profile page fetches key, shows download links, has rotate button
+  ✅ downloads route gates on session, redirects unauth to login
+
+────────────────────────────────────────────────────────────
+Results: 52 passed, 0 failed
+All tests passed ✅
+```
+
+### **New env/secrets**
+
+| Variable | Where | Status |
+|----------|-------|--------|
+| `HELPER_SIGNING_SECRET` | Vercel production | ✅ Set |
+| `HELPER_SIGNING_SECRET` | Cloudflare worker secret | ✅ Set |
+| `HELPER_DOWNLOAD_BASE_URL` | Vercel (optional) | Not set (defaults to GitHub Releases) |
+
+### **Build and deployment**
+
+- `npm run build` passes ✅
+- Commits: `1342c67`, `2f25a7d`, `de048ca`, `a5172f1` → pushed to `origin/main`
+- Vercel deploy: READY ✅
+- Worker deployed: version `c8264491` ✅
+- Root → 307 /login intact ✅
+- `/api/internal/validate-helper-key` with no auth → 401 ✅
+- `/api/internal/validate-helper-key` with wrong Bearer → 401 ✅
+
+### **Files changed (Session 14)**
+
+| File | Change |
+|------|--------|
+| `scripts/migrate.mjs` | `helper_key_version` column + `session_code` column + index (idempotent) |
+| `app/lib/auth.js` | `generateHelperKey()`, `decodeHelperKey()`, `verifyHelperKeyHmac()` |
+| `app/api/helper-key/route.js` | New — GET (return key) + POST (rotate) |
+| `app/api/internal/validate-helper-key/route.js` | New — internal endpoint for worker (Bearer auth) |
+| `app/api/downloads/[platform]/route.js` | New — auth-gated download proxy to GitHub Releases |
+| `app/api/meetings/route.js` | POST accepts `session_code` |
+| `app/api/meetings/[id]/route.js` | PATCH accepts `session_code` |
+| `app/session/page.js` | Sends `session_code` on meeting create/update |
+| `app/profile/page.js` | Desktop helper card: OS detection, downloads, key display + rotate |
+| `middleware.js` | `/api/internal/` added to PUBLIC paths |
+| `helper/package.json` | Mac build targets + dist:mac/win scripts, version bump 0.1→0.2 |
+| `helper/main.js` | safeStorage IPC (`save-pairing-key`, `load-pairing-key`) |
+| `helper/preload.js` | Exposes savePairingKey/loadPairingKey via context bridge |
+| `helper/renderer.js` | Pairing key field, safeStorage load/save, key in WS URL, auth error handling |
+| `helper/index.html` | Pairing key section with password input + Save button |
+| `helper/README.md` | Updated: cross-platform, pairing key flow, troubleshooting |
+| `worker/src/index.js` | `validateHelperKey()` fn + WS connect gating with 4401 close |
+| `worker/wrangler.toml` | `APP_BASE_URL` var added |
+| `.github/workflows/smc-helper.yml` | CI: Mac + Windows builds, GitHub Release on push to main |
+| `scripts/test-helper-pairing.mjs` | New — 52 assertions, all pass |
+
+### **Code-signing / notarisation follow-up (unsigned builds)**
+
+The CI builds are unsigned. Users will see:
+- **macOS Gatekeeper:** "SMC-Helper.dmg is from an unidentified developer" — right-click → Open bypasses this
+- **Windows SmartScreen:** "Windows protected your PC" — click "More info" → "Run anyway"
+
+To remove warnings (future work):
+- **Mac:** Apple Developer ID Application certificate + `codesign` + `notarytool` submission
+- **Windows:** Code signing certificate (Sectigo EV or equivalent) + `signtool.exe`
+
+Neither blocks functionality. For a team-internal tool, unsigned is acceptable.
+
+### **Binary sourcing**
+
+Binaries are built by `.github/workflows/smc-helper.yml` on every push to `main` that touches `helper/**`. The workflow:
+1. Builds on `macos-latest` and `windows-latest` in parallel
+2. Publishes as GitHub Release `helper-latest` (overwrites on each build)
+3. `/api/downloads/mac` → redirects to `https://github.com/.../releases/latest/download/SMC-Helper.dmg`
+4. `/api/downloads/win` → redirects to `https://github.com/.../releases/latest/download/SMC-Helper-Setup.exe`
+
+First binaries will be built when the CI workflow runs (triggered by the `.github/workflows/smc-helper.yml` push). Until then, the download links will 404 at GitHub. This is documented.
 
 ---
 
