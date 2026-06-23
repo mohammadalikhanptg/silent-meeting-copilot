@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSql } from '../../../lib/db';
-import { sha256, preCookieValue, cookieOptions, PRE_COOKIE, PRE_MAXAGE, isAllowed } from '../../../lib/auth';
+import { sha256, preCookieValue, cookieOptions, PRE_COOKIE, PRE_MAXAGE, isAllowedFull } from '../../../lib/auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,7 +18,7 @@ export async function POST(req) {
   if (!row || row.consumed_at || new Date(row.expires_at) < new Date()) return NextResponse.json({ ok: false }, { status: 400 });
 
   // Re-check allowlist — an email removed after the link was sent is denied here
-  if (!isAllowed(row.email)) return NextResponse.json({ ok: false }, { status: 403 });
+  if (!await isAllowedFull(row.email, sql)) return NextResponse.json({ ok: false }, { status: 403 });
 
   const upd = await sql`UPDATE magic_links SET consumed_at = now() WHERE id = ${row.id} AND consumed_at IS NULL RETURNING id`;
   if (!upd[0]) return NextResponse.json({ ok: false }, { status: 400 });

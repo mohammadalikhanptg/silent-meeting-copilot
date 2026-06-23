@@ -95,6 +95,25 @@ try {
     created_at timestamptz NOT NULL DEFAULT now()
   )`;
   await sql`CREATE INDEX IF NOT EXISTS idx_auth_attempts_key ON auth_attempts (type, key, created_at)`;
+  // Session 12 P1: user roles — add role column, set admin for Mo's allowlist emails
+  await sql`ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS role text NOT NULL DEFAULT 'user'`;
+  const adminEmails = (process.env.AUTH_ALLOWLIST || 'ali@pacific.london,ali@pacificinfotech.co.uk')
+    .split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+  for (const ae of adminEmails) {
+    await sql`UPDATE auth_users SET role = 'admin' WHERE email = ${ae} AND role != 'admin'`;
+  }
+  // Session 12 P2: invitations — inert until admin manually sends the link
+  await sql`CREATE TABLE IF NOT EXISTS invites (
+    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    email       text NOT NULL,
+    token       text NOT NULL UNIQUE,
+    invited_by  text NOT NULL,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    accepted_at timestamptz,
+    status      text NOT NULL DEFAULT 'pending'
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_invites_email ON invites(email)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_invites_token ON invites(token)`;
   // Auth hardening 4: encrypt existing plaintext TOTP secrets in place
   const encKey = process.env.TOTP_ENC_KEY;
   if (encKey) {

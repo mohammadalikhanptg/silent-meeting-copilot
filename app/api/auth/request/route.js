@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSql } from '../../../lib/db';
-import { isAllowed, randomToken, sha256 } from '../../../lib/auth';
+import { isAllowedFull, randomToken, sha256 } from '../../../lib/auth';
 import { sendMagicLink } from '../../../lib/email';
 
 export const runtime = 'nodejs';
@@ -14,11 +14,13 @@ export async function POST(req) {
   try { body = await req.json(); } catch { body = {}; }
   const email = (body.email || '').trim().toLowerCase();
   const generic = NextResponse.json({ ok: true });
-  if (!email || !isAllowed(email)) return generic;
+  if (!email) return generic;
 
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || null;
   const ua = req.headers.get('user-agent') || null;
   const sql = getSql();
+
+  if (!await isAllowedFull(email, sql)) return generic;
 
   // Rate limit: per-email (existing) and per-IP (new)
   const [byEmail, byIp] = await Promise.all([

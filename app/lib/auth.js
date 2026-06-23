@@ -26,6 +26,16 @@ export function isAllowed(email) {
   return allowlist().includes(email.trim().toLowerCase());
 }
 
+export async function isAllowedFull(email, sql) {
+  if (!email) return false;
+  if (isAllowed(email)) return true;
+  // Check accepted invite
+  const rows = await sql`
+    SELECT id FROM invites WHERE email = ${email.trim().toLowerCase()} AND status = 'accepted' LIMIT 1
+  `;
+  return rows.length > 0;
+}
+
 export function randomToken(bytes = 32) {
   return crypto.randomBytes(bytes).toString('base64url');
 }
@@ -147,10 +157,14 @@ export async function getSessionPayload() {
   if (!p || p.t !== 'session') return null;
   if (!p.sid) return null; // all sessions have sid; missing = legacy invalid token
 
+  let role = 'user';
   try {
     const sql = getSql();
     const rows = await sql`
-      SELECT id, revoked_at, expires_at FROM sessions WHERE id = ${p.sid} LIMIT 1
+      SELECT s.id, s.revoked_at, s.expires_at, COALESCE(u.role, 'user') AS role
+      FROM sessions s
+      LEFT JOIN auth_users u ON u.email = s.email
+      WHERE s.id = ${p.sid} LIMIT 1
     `;
     if (!rows[0]) return null;
     const row = rows[0];
@@ -162,13 +176,14 @@ export async function getSessionPayload() {
       return null;
     }
     if (new Date(row.expires_at) < new Date()) return null;
+    role = row.role || 'user';
     sql`UPDATE sessions SET last_seen = now() WHERE id = ${p.sid}`.catch(() => {});
   } catch (e) {
     console.error('[auth] session DB check failed:', e.message);
     return null;
   }
 
-  return p;
+  return { ...p, role };
 }
 
 export async function getPrePayload() {

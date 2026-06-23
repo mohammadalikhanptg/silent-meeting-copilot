@@ -79,6 +79,7 @@ export default async function SessionsPage() {
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <a href="/profile" style={styles.navLink}>Profile</a>
+          {session.role === 'admin' && <a href="/admin" style={styles.navLink}>Admin</a>}
           <NewSessionButton style={btnStyle} />
         </div>
       </div>

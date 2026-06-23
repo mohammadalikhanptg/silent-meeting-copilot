@@ -5,7 +5,7 @@ import {
   getPrePayload, generateTotpSecret, otpauthUri, verifyTotp,
   encryptTotpSecret, decryptTotpSecret, isTotpEncrypted,
   sessionCookieValue, cookieOptions, SESSION_COOKIE, SESSION_MAXAGE, PRE_COOKIE,
-  isAllowed,
+  isAllowedFull,
 } from '../../../lib/auth';
 import { alertNewDevice, alertTotpLockout } from '../../../lib/auth-alerts';
 
@@ -41,15 +41,15 @@ export async function POST(req) {
   const pre = await getPrePayload();
   if (!pre) return NextResponse.json({ error: 'no_pre' }, { status: 401 });
 
-  // Re-check allowlist at session creation
-  if (!isAllowed(pre.email)) return NextResponse.json({ error: 'not_allowed' }, { status: 403 });
-
   let body;
   try { body = await req.json(); } catch { body = {}; }
   const code = (body.code || '').toString();
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || null;
 
   const sql = getSql();
+
+  // Re-check allowlist at session creation (env allowlist or accepted invite)
+  if (!await isAllowedFull(pre.email, sql)) return NextResponse.json({ error: 'not_allowed' }, { status: 403 });
 
   // Lockout: count recent failures within window
   const windowStart = new Date(Date.now() - TOTP_LOCKOUT_MS);
