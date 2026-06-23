@@ -1,12 +1,27 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+
+const GUIDE_PROMPT = `I need your help writing an "about me" document I can paste into an AI meeting copilot as my always-on coaching context.
+
+Please ask me about each of the following one section at a time, then produce a clean Markdown document with all my answers:
+
+1. **Who I am** — my name, job title, and seniority
+2. **My company / companies** — what they do, size, industry, and website
+3. **My expertise** — key skills, technical areas, and knowledge domains
+4. **Communication style** — how I typically present myself in meetings (concise vs detail-heavy, formal vs conversational, etc.)
+5. **Typical meetings** — the kinds of meetings I usually run or attend (sales calls, client reviews, technical deep-dives, board updates, etc.)
+6. **My goals in meetings** — what I'm usually trying to achieve (close a deal, get alignment, gather information, build trust, etc.)
+7. **How I like to be coached** — what kind of real-time guidance is most useful to me (flag open questions, suggest follow-ups, prompt me to share specific info, etc.)
+
+Once you have all my answers, produce a clean Markdown document I can paste directly into my profile.`;
 
 export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
+  const [guideCopied, setGuideCopied] = useState(false);
 
   const [businesses, setBusinesses] = useState([]);
   const [postalAddress, setPostalAddress] = useState('');
@@ -15,6 +30,15 @@ export default function ProfilePage() {
   const [socialLinks, setSocialLinks] = useState([]);
   const [bio, setBio] = useState('');
   const [commonItems, setCommonItems] = useState([]);
+
+  // P1: Profile dual-input — typed reference text + uploaded docs
+  const [profileRefText, setProfileRefText] = useState('');
+  const [profileDocs, setProfileDocs] = useState([]); // [{id, filename, size_bytes, added_at}]
+  const [docUploading, setDocUploading] = useState(false);
+  const [docError, setDocError] = useState('');
+  const fileInputRef = useRef(null);
+  const dropZoneRef = useRef(null);
+  const [dragOver, setDragOver] = useState(false);
 
   useEffect(() => {
     fetch('/api/profile')
@@ -29,6 +53,14 @@ export default function ProfilePage() {
           setSocialLinks(p.social_links || []);
           setBio(p.bio || '');
           setCommonItems(p.common_items || []);
+          setProfileRefText(p.profile_reference_text || '');
+          // Docs: map from content-bearing profile_docs to display metadata
+          setProfileDocs((p.profile_docs || []).map(doc => ({
+            id: doc.id,
+            filename: doc.filename,
+            size_bytes: doc.content_text ? new TextEncoder().encode(doc.content_text).length : 0,
+            added_at: doc.added_at,
+          })));
         }
       })
       .catch(() => setError('Failed to load profile.'))
@@ -51,6 +83,7 @@ export default function ProfilePage() {
           social_links: socialLinks,
           bio: bio || null,
           common_items: commonItems,
+          profile_reference_text: profileRefText || null,
         }),
       });
       if (!res.ok) throw new Error('Save failed');
@@ -61,6 +94,74 @@ export default function ProfilePage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  // P2: Guide prompt copy
+  const copyGuide = () => {
+    navigator.clipboard.writeText(GUIDE_PROMPT).then(() => {
+      setGuideCopied(true);
+      setTimeout(() => setGuideCopied(false), 2000);
+    });
+  };
+
+  // P1: File upload handler
+  const uploadFile = async (file) => {
+    setDocError('');
+    const lower = file.name.toLowerCase();
+    if (!lower.endsWith('.md') && !lower.endsWith('.txt')) {
+      setDocError('Only .md and .txt files are accepted.');
+      return;
+    }
+    setDocUploading(true);
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const content = e.target.result;
+      try {
+        const res = await fetch('/api/profile-docs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: file.name, content }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setDocError(data.error || 'Upload failed.');
+        } else {
+          setProfileDocs(prev => [...prev, {
+            id: data.doc.id,
+            filename: data.doc.filename,
+            size_bytes: new TextEncoder().encode(content).length,
+            added_at: data.doc.added_at,
+          }]);
+        }
+      } catch {
+        setDocError('Upload failed — network error.');
+      } finally {
+        setDocUploading(false);
+      }
+    };
+    reader.onerror = () => { setDocError('Failed to read file.'); setDocUploading(false); };
+    reader.readAsText(file, 'utf-8');
+  };
+
+  const removeDoc = async (docId) => {
+    setDocError('');
+    try {
+      const res = await fetch(`/api/profile-docs/${docId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Remove failed');
+      setProfileDocs(prev => prev.filter(d => d.id !== docId));
+    } catch {
+      setDocError('Failed to remove document.');
+    }
+  };
+
+  // Drag-and-drop handlers
+  const onDragOver = (e) => { e.preventDefault(); setDragOver(true); };
+  const onDragLeave = () => setDragOver(false);
+  const onDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file) uploadFile(file);
   };
 
   // List-field helpers
@@ -102,7 +203,11 @@ export default function ProfilePage() {
 
   return (
     <>
-      <style>{`* { box-sizing: border-box; } @media (max-width: 600px) { .pf-row { flex-direction: column !important; } }`}</style>
+      <style>{`
+        * { box-sizing: border-box; }
+        @media (max-width: 600px) { .pf-row { flex-direction: column !important; } }
+        .pf-dropzone:focus { outline: 2px solid #38bdf8; }
+      `}</style>
       <div style={styles.root}>
         <div style={styles.header}>
           <div>
@@ -130,6 +235,112 @@ export default function ProfilePage() {
         </div>
 
         <div style={styles.form}>
+
+          {/* ---- P1/P2: Coaching context (dual-input) ---- */}
+          <section style={{ ...styles.section, border: '1px solid #1e3a5f', background: '#0c1f33' }}>
+            <div style={styles.sectionHeader}>
+              <span style={{ ...styles.sectionTitle, color: '#93c5fd' }}>Coaching context (always-on)</span>
+              <span style={{ fontSize: 11, color: '#6b7280' }}>fed to the AI coach in every session</span>
+            </div>
+            <p style={{ fontSize: 13, color: '#9aa0a6', margin: 0, lineHeight: 1.5 }}>
+              Describe yourself here — who you are, your role, your companies, how you like to be coached.
+              This is included automatically in every session as background context.
+              You can type it directly, dictate it, or upload a Markdown / text file.
+            </p>
+
+            {/* P2: Guide prompt */}
+            <div style={styles.guideBox}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#93c5fd', marginBottom: 6 }}>
+                Generate your about-me with AI
+              </div>
+              <p style={{ fontSize: 12, color: '#9aa0a6', margin: '0 0 10px' }}>
+                Copy the prompt below, paste it into ChatGPT or Claude, and answer the questions.
+                Then paste the generated Markdown into the text box or upload it as a file.
+              </p>
+              <pre style={styles.guidePre}>{GUIDE_PROMPT}</pre>
+              <button
+                style={{ ...styles.copyBtn, background: guideCopied ? '#14532d' : '#1a2a3a', borderColor: guideCopied ? '#22c55e' : '#1e3a5f', color: guideCopied ? '#22c55e' : '#93c5fd' }}
+                onClick={copyGuide}
+              >
+                {guideCopied ? '✓ Copied!' : 'Copy prompt'}
+              </button>
+            </div>
+
+            {/* Typed / dictated text */}
+            <div>
+              <label style={{ fontSize: 12, color: '#9aa0a6', display: 'block', marginBottom: 4 }}>
+                Type or paste your about-me context
+              </label>
+              <textarea
+                style={{ ...styles.input, height: 140, resize: 'vertical', width: '100%' }}
+                placeholder="I am Mohammad Ali Khan, director of Pacific Technology Group (pacific.london), a cybersecurity consultancy. I typically run advisory meetings with enterprise clients. Coach me to stay on track and surface relevant talking points…"
+                value={profileRefText}
+                onChange={e => setProfileRefText(e.target.value)}
+                maxLength={2000}
+              />
+              <div style={{ fontSize: 11, color: '#6b7280', textAlign: 'right', marginTop: 2 }}>
+                {profileRefText.length}/2000 chars
+              </div>
+            </div>
+
+            {/* File upload zone */}
+            <div>
+              <label style={{ fontSize: 12, color: '#9aa0a6', display: 'block', marginBottom: 4 }}>
+                Or upload a .md / .txt about-me document
+              </label>
+              <div
+                ref={dropZoneRef}
+                className="pf-dropzone"
+                tabIndex={0}
+                role="button"
+                aria-label="Upload a .md or .txt file"
+                style={{
+                  ...styles.dropZone,
+                  borderColor: dragOver ? '#38bdf8' : '#1e3a5f',
+                  background: dragOver ? '#0d2035' : '#071525',
+                }}
+                onDragOver={onDragOver}
+                onDragLeave={onDragLeave}
+                onDrop={onDrop}
+                onClick={() => fileInputRef.current?.click()}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') fileInputRef.current?.click(); }}
+              >
+                <span style={{ fontSize: 13, color: '#4b6a8a' }}>
+                  {docUploading
+                    ? 'Uploading…'
+                    : <><strong style={{ color: '#38bdf8' }}>Drag & drop</strong> a .md or .txt file here, or <strong style={{ color: '#38bdf8' }}>click to browse</strong></>
+                  }
+                </span>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".md,.txt"
+                  style={{ display: 'none' }}
+                  onChange={e => { if (e.target.files[0]) uploadFile(e.target.files[0]); e.target.value = ''; }}
+                />
+              </div>
+              {docError && <div style={{ fontSize: 12, color: '#fca5a5', marginTop: 4 }}>{docError}</div>}
+            </div>
+
+            {/* Uploaded docs list */}
+            {profileDocs.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>Uploaded profile documents:</div>
+                {profileDocs.map(doc => (
+                  <div key={doc.id} style={styles.docRow}>
+                    <span style={{ fontSize: 13, color: '#e6e8eb', flex: 1 }}>{doc.filename}</span>
+                    <span style={{ fontSize: 11, color: '#6b7280', marginRight: 8 }}>
+                      {Math.ceil(doc.size_bytes / 1024)} KB
+                    </span>
+                    <button style={styles.removeBtn} onClick={() => removeDoc(doc.id)} title="Remove document">✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {profileDocs.length === 0 && (
+              <div style={{ fontSize: 12, color: '#6b7280', fontStyle: 'italic' }}>No profile documents uploaded</div>
+            )}
+          </section>
 
           {/* Businesses */}
           <section style={styles.section}>
@@ -325,6 +536,34 @@ const styles = {
   infoBox: {
     background: '#0c1f33', border: '1px solid #1e3a5f',
     borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#93c5fd', lineHeight: 1.5,
+  },
+  guideBox: {
+    background: '#071525', border: '1px solid #1e3a5f',
+    borderRadius: 10, padding: 14,
+  },
+  guidePre: {
+    background: '#0a1a2a', border: '1px solid #1e3a5f',
+    borderRadius: 8, padding: '12px 14px',
+    fontSize: 12, color: '#cbd5e1', lineHeight: 1.6,
+    fontFamily: '"Fira Mono","Consolas","Courier New",monospace',
+    whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+    margin: '0 0 10px',
+  },
+  copyBtn: {
+    border: '1px solid', borderRadius: 6,
+    padding: '5px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+    transition: 'background 0.15s',
+  },
+  dropZone: {
+    border: '2px dashed', borderRadius: 10,
+    padding: '20px 16px', textAlign: 'center',
+    cursor: 'pointer', transition: 'border-color 0.15s, background 0.15s',
+    userSelect: 'none',
+  },
+  docRow: {
+    display: 'flex', alignItems: 'center', gap: 8,
+    background: '#0a1a2a', border: '1px solid #1e3a5f',
+    borderRadius: 6, padding: '5px 10px',
   },
   form: { display: 'flex', flexDirection: 'column', gap: 24 },
   section: {

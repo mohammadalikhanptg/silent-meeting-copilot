@@ -47,7 +47,22 @@ export async function GET() {
 
   const sql = getSql();
   const profile = await getOrCreateProfile(sql, session.email);
-  return NextResponse.json({ profile });
+
+  // Include uploaded profile docs (with content_text) so session page can pass them to coaching
+  const docs = await sql`
+    SELECT id, filename, content_text, added_at
+    FROM profile_docs
+    WHERE user_email = ${session.email}
+    ORDER BY added_at
+  `;
+
+  return NextResponse.json({
+    profile: {
+      ...profile,
+      profile_reference_text: profile.profile_reference_text || '',
+      profile_docs: docs,
+    },
+  });
 }
 
 export async function PUT(request) {
@@ -57,7 +72,7 @@ export async function PUT(request) {
   const body = await request.json().catch(() => ({}));
   const {
     businesses, postal_address, phone, emails,
-    social_links, bio, common_items,
+    social_links, bio, common_items, profile_reference_text,
   } = body;
 
   const sql = getSql();
@@ -68,14 +83,15 @@ export async function PUT(request) {
   const [updated] = await sql`
     UPDATE user_profiles
     SET
-      businesses    = ${JSON.stringify(businesses ?? [])},
-      postal_address = ${postal_address ?? null},
-      phone         = ${phone ?? null},
-      emails        = ${JSON.stringify(emails ?? [])},
-      social_links  = ${JSON.stringify(social_links ?? [])},
-      bio           = ${bio ?? null},
-      common_items  = ${JSON.stringify(common_items ?? [])},
-      updated_at    = now()
+      businesses             = ${JSON.stringify(businesses ?? [])},
+      postal_address         = ${postal_address ?? null},
+      phone                  = ${phone ?? null},
+      emails                 = ${JSON.stringify(emails ?? [])},
+      social_links           = ${JSON.stringify(social_links ?? [])},
+      bio                    = ${bio ?? null},
+      common_items           = ${JSON.stringify(common_items ?? [])},
+      profile_reference_text = ${profile_reference_text ?? null},
+      updated_at             = now()
     WHERE user_email = ${session.email}
     RETURNING *
   `;

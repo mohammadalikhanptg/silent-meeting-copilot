@@ -59,6 +59,16 @@ try {
     added_at     timestamptz NOT NULL DEFAULT now()
   )`;
   await sql`CREATE INDEX IF NOT EXISTS idx_ref_docs_meeting ON session_reference_docs (meeting_id, added_at)`;
+  // Session 10 P1: profile dual-input — typed reference text + uploaded profile docs
+  await sql`ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS profile_reference_text text`;
+  await sql`CREATE TABLE IF NOT EXISTS profile_docs (
+    id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_email   text NOT NULL,
+    filename     text NOT NULL,
+    content_text text NOT NULL,
+    added_at     timestamptz NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_profile_docs_user ON profile_docs (user_email, added_at)`;
   console.log('[migrate] ok');
 } catch (e) {
   // Permission denied = local env has a read-only DATABASE_URL.

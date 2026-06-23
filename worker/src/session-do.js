@@ -912,12 +912,22 @@ export async function generateCoaching({ me = [], others = [], objective = '', p
 
   // Safely delimit user-supplied context — P4 security: treat as reference data, not instructions
   let userContextBlock = '';
-  if (context || (refDocs && refDocs.length > 0)) {
+  {
     const parts = [];
+    // Profile-level always-on reference (typed text + uploaded profile docs)
+    const profileRefText = profile && profile.profile_reference_text;
+    const profileDocs = profile && Array.isArray(profile.profile_docs) ? profile.profile_docs : [];
+    if (profileRefText) parts.push(`Operator profile context:\n${String(profileRefText).slice(0, 2000)}`);
+    for (const doc of profileDocs) {
+      if (doc.filename && doc.content_text) {
+        parts.push(`Operator profile document "${doc.filename}":\n${String(doc.content_text).slice(0, 2000)}`);
+      }
+    }
+    // Session-level reference (context notes + uploaded session ref docs)
     if (context) parts.push(`Meeting context notes:\n${context}`);
     for (const doc of (refDocs || [])) {
       if (doc.filename && doc.content_text) {
-        parts.push(`Document "${doc.filename}":\n${doc.content_text.slice(0, 2000)}`);
+        parts.push(`Session document "${doc.filename}":\n${doc.content_text.slice(0, 2000)}`);
       }
     }
     if (parts.length > 0) {
