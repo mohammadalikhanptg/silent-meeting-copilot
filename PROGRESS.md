@@ -1,156 +1,188 @@
 # Silent Meeting Copilot — Overnight Build Progress
 
-**Date:** 2026-06-23 (Session 2 updates in bold)  
-**Session:** Autonomous overnight build × 2
+**Date:** 2026-06-23 (Session 3 updates in bold)  
+**Session:** Autonomous overnight build × 3
 
 ---
 
 ## Summary
 
-All four tasks (P1–P4) across both sessions are complete or at maximum completable state on this Mac.
+All four tasks (P1–P4) across all sessions are complete or at maximum completable state on this Mac.
 
 ---
 
-## P1 — Pluggable Multilingual STT ✅ COMPLETE (Session 2)
+## **Session 3 — Per-Meeting Language Selector ✅ COMPLETE**
 
-### What was built
+### **P1 — Language selector on the session screen**
 
-- **Pluggable provider interface** in `worker/src/session-do.js`
-- Default provider: **Cloudflare Workers AI Whisper** (free, no keys, always active)
-- Optional provider: **Deepgram nova-2** — selected automatically when `DEEPGRAM_API_KEY` is present in Worker env
-- Language hint support: `?lang=hi` on both `/transcribe` and `/session/:id/ws`; DO also accepts `{"type":"config","lang":"..."}` control messages
-- `/health` endpoint now reports the active provider: `{"ok":true,"provider":"cloudflare"}`
+Replaced the generic 8-language dropdown with a clear **"Meeting language"** selector. Before the session starts, the user sees:
 
-### To enable real Hindi/Urdu (Deepgram)
+| Option | Display | Mode value | STT provider |
+|--------|---------|------------|--------------|
+| Default | **English (fast)** | `english` | Cloudflare Whisper (free, always works) |
+| Optional | **Hindi / Urdu (multilingual)** | `hindi-urdu` | Deepgram nova-2 (requires key) |
+| Optional | **Auto-detect** | `auto` | Deepgram if key present, else Cloudflare |
 
-Run this exact command and enter your Deepgram API key when prompted:
+**Behaviour when Hindi/Urdu selected:**
+- The UI fetches `/health` on page mount to check whether `deepgramAvailable` is `true` or `false`
+- If Deepgram key is **not configured**: amber warning box appears, Start button is disabled, session cannot start in this mode
+- If Deepgram key **is configured**: session starts with `?mode=hindi-urdu&lang=hi` sent to the engine
+- During a live session: the footer and status bar show the active mode label (e.g. "Live — Hindi / Urdu")
+- If the engine reports `deepgram_unavailable` mid-session (belt-and-braces): a red error message appears — no silent fallback to English
+
+**Files changed:**
+- `app/session/page.js` — replaced `lang` state with `mode` state; added `deepgramAvailable` check; redesigned selector; warning box; mode badge; WS error handler
+
+### **P2 — Engine per-session provider selection**
+
+The Worker now routes STT provider **per session** based on the `mode` query parameter, not the global key-presence check.
+
+**Provider routing (new logic in `transcribeAndClean`):**
+
+```
+mode=english    → always Cloudflare Whisper (key irrelevant)
+mode=hindi-urdu → key present: Deepgram nova-2
+                  key absent:  return {error:'deepgram_unavailable'} — NEVER falls back silently
+mode=auto       → Deepgram if key present, else Cloudflare (legacy / default)
+```
+
+**Changes propagated end-to-end:**
+- `transcribeAndClean(audioBytes, env, lang, mode)` — new `mode` param
+- `SessionDO` stores `this.mode` per connection; reads `?mode=` on WS connect; accepts `{type:"config",mode:"..."}` control messages
+- `GET /health` now returns `{deepgramAvailable: true|false}` field
+- `POST /transcribe?mode=hindi-urdu` routes to Deepgram
+- `GET /session/:id/ws?mode=hindi-urdu&lang=hi` sets mode for that DO instance
+
+**Acceptance tests — PASSED (2026-06-23):**
 
 ```bash
-cd worker
-export CLOUDFLARE_API_TOKEN=$(grep '^export CLOUDFLARE_DEPLOY_TOKEN' ~/.pacific/env | tr -d '\r"' | sed 's/export CLOUDFLARE_DEPLOY_TOKEN=//')
+# Generate test audio
+say -o /tmp/s.aiff "Testing English mode with Cloudflare provider"
+afconvert /tmp/s.aiff /tmp/s.wav -d LEI16 -f WAVE
+
+# mode=english → Cloudflare, transcribes correctly
+curl -s -X POST "https://smc-engine.ali-6b8.workers.dev/transcribe?mode=english&lang=en" \
+  -H "Content-Type: audio/wav" --data-binary @/tmp/s.wav
+# {"ok":true,"raw":"testing English mode...","cleaned":"Testing English mode...","provider":"cloudflare"}
+
+# mode=hindi-urdu, no key → explicit error, NOT silent fallback
+curl -s -X POST "https://smc-engine.ali-6b8.workers.dev/transcribe?mode=hindi-urdu&lang=hi" \
+  -H "Content-Type: audio/wav" --data-binary @/tmp/s.wav
+# {"ok":true,"raw":"","cleaned":"","provider":"deepgram","error":"deepgram_unavailable"}
+
+# mode=auto, no key → Cloudflare
+curl -s -X POST "https://smc-engine.ali-6b8.workers.dev/transcribe?mode=auto" \
+  -H "Content-Type: audio/wav" --data-binary @/tmp/s.wav
+# {"ok":true,"raw":"testing English mode...","provider":"cloudflare"}
+
+# Health check confirms deepgramAvailable field
+curl -s https://smc-engine.ali-6b8.workers.dev/health
+# {"ok":true,"ts":...,"provider":"cloudflare","deepgramAvailable":false}
+```
+
+All three routing branches verified. ✅
+
+### **P3 — Ship and verify**
+
+```bash
+npm run build  # Passed — /session compiles as ○ (Static), no errors
+git push origin main  # Pushed commit 77cc182
+```
+
+**Vercel deployment:** `silent-meeting-copilot-i568wkaez-pacifictechnologygroup.vercel.app`  
+**State:** READY  
+**Commit:** `77cc182` (feat(P1-P2): per-meeting language selector + per-session STT provider routing)  
+**Site root:** Returns `307 → /login` — auth middleware intact ✅
+
+---
+
+## P4 — Operator handoff
+
+### To enable Hindi / Urdu (Deepgram)
+
+Run this exact command on your machine. Enter your Deepgram API key when prompted (get one at [console.deepgram.com](https://console.deepgram.com)):
+
+```bash
+cd ~/claude-workspace/silent-meeting-copilot/worker
+export CLOUDFLARE_API_TOKEN=$(grep 'CLOUDFLARE_DEPLOY_TOKEN' ~/.pacific/env | tr -d '\r"' | sed 's/.*CLOUDFLARE_DEPLOY_TOKEN=//')
 npx wrangler secret put DEEPGRAM_API_KEY
 ```
 
-After setting the key, the Worker automatically switches to Deepgram nova-2 for all transcriptions. Verify with `curl -s https://smc-engine.ali-6b8.workers.dev/health` — response should show `"provider":"deepgram"`.
-
-**To revert to Cloudflare (free):** delete the secret with `wrangler secret delete DEEPGRAM_API_KEY`.
-
-### Provider selection logic (code reference)
-
-`worker/src/session-do.js` line 85:
-```javascript
-const provider = env.DEEPGRAM_API_KEY ? 'deepgram' : 'cloudflare';
-```
-
-Deepgram path is code-complete but guarded behind the env key check. With no key set, the Cloudflare path runs exclusively.
-
-### Acceptance test — PASSED (2026-06-23)
+After setting the key, verify:
 
 ```bash
-# Generate speech sample
-say -o /tmp/s.aiff "This is a test of the silent meeting copilot multilingual engine"
-afconvert /tmp/s.aiff /tmp/s.wav -d LEI16 -f WAVE
-
-# POST to engine (no DEEPGRAM_API_KEY set)
-curl -s -X POST https://smc-engine.ali-6b8.workers.dev/transcribe \
-  -H "Content-Type: audio/wav" --data-binary @/tmp/s.wav
+curl -s https://smc-engine.ali-6b8.workers.dev/health
+# Should return: {"ok":true,...,"provider":"deepgram","deepgramAvailable":true}
 ```
 
-**Output:**
-```json
-{
-  "ok": true,
-  "raw": "This is a test of the silent meeting copilot multi-lingual engine.",
-  "cleaned": "This is a test of the silent meeting copilot multi-lingual engine.",
-  "provider": "cloudflare"
-}
-```
+The worker redeploys automatically with the new secret. Within seconds, the `/session` UI will show the Hindi/Urdu option as available (amber warning box disappears, Start Session becomes enabled for that mode).
 
-Transcript non-empty, provider correctly `cloudflare`. ✅  
-Deepgram code path present and guarded (visible in `transcribeDeepgram()` function). ✅
-
-### Language hint test
-
+**To revert to Cloudflare (free):**
 ```bash
-curl -s -X POST "https://smc-engine.ali-6b8.workers.dev/transcribe?lang=en" \
-  -H "Content-Type: audio/wav" --data-binary @/tmp/s.wav
-# Returns same transcript with lang passed to Whisper input
+npx wrangler secret delete DEEPGRAM_API_KEY
 ```
 
-### Session 1 — Cloudflare Engine (background)
+### How the per-meeting selector works
+
+1. User opens `/session` in the browser
+2. The page fetches `/health` — determines whether Deepgram is available
+3. User sees the **Meeting language** selector (top-right controls area):
+   - **English (fast)** — default, always works
+   - **Hindi / Urdu (multilingual)** — only enabled if Deepgram key is configured
+   - **Auto-detect** — uses Deepgram if available, else Cloudflare
+4. If Hindi/Urdu is selected but Deepgram key is not set: amber warning box appears and Start Session is greyed out with an explanation
+5. User clicks **Start Session** — the WebSocket URL includes `?mode=english` (or `hindi-urdu`) so the engine knows which provider to use for that session only
+6. During the live session: footer shows active mode (e.g. "English (fast)" or "Hindi / Urdu")
+7. The mode choice affects only that session; each new session can pick independently
+
+### What still needs the operator
+
+| Item | Needs | Blocker |
+|------|-------|---------|
+| Enable Hindi/Urdu transcription | `wrangler secret put DEEPGRAM_API_KEY` | Need Deepgram account + key |
+| Windows helper audio bridge | Test on Windows 10/11 | Requires Windows hardware (WASAPI loopback) |
+| End-to-end shared session test | Windows helper + browser open same session code | Requires Windows hardware |
+| Electron installer | `npm run dist` in `helper/` + `assets/icon.ico` | Can be done on any machine |
+
+---
+
+## Session 1 — Cloudflare Engine ✅
 
 - Worker deployed at `https://smc-engine.ali-6b8.workers.dev`
-- Worker source: `worker/src/index.js` + `worker/src/session-do.js`
 - Endpoints: `GET /health`, `POST /transcribe`, `GET /session/:id/ws`, `GET /session/:id/info`
-- Working models: `@cf/openai/whisper` (ASR) + `@cf/meta/llama-3.2-3b-instruct` (LLM cleanup)
-- Previous acceptance test output: `"This is a test of the silent meeting copilot transcription engine."` ✅
+- Models: `@cf/openai/whisper` (ASR) + `@cf/meta/llama-3.2-3b-instruct` (LLM cleanup)
 
 ---
 
-## P2 — Shared Sessions ✅ COMPLETE (Session 2)
+## Session 2 — Shared Sessions + Hardened UI ✅
 
-### What was built
+### Shared sessions
 
-- **Short human-readable session codes** — format `abc-1234` (3 letters + 4 digits, no ambiguous chars), e.g. `drk-8421`
-- `/session` page: reads `?s=<code>` from URL on mount, or generates a new code and updates URL via `history.replaceState`
-- **Copy link button** in the session page header — copies the full shareable URL (e.g. `https://...vercel.app/session?s=drk-8421`)
-- **OTHERS panel** shows the session code prominently while empty, guiding the user to share it
-- `helper/index.html`: added session code input field with label and hint text
-- `helper/renderer.js`: reads the input on Start — if filled, joins that session; if empty, generates a new code and shows it
+- Short human-readable session codes: format `abc-1234`
+- `/session?s=<code>` — reads code from URL or generates one
+- Copy link button in session page header
+- Helper connects to same Durable Object using `env.SESSIONS.idFromName(code)`
 
-### How to use the shared session
+### Hardened /session page
 
-1. Open `/session` in the browser — the session code (e.g. `drk-8421`) appears in the header
-2. Click **Copy link** — paste into another tab or share the URL
-3. On the Windows machine, open the SMC Helper, type `drk-8421` in the **Session code** field, then click **Start**
-4. Both clients connect to the same Durable Object via `env.SESSIONS.idFromName('drk-8421')`
-5. ME transcripts (from helper mic) and OTHERS transcripts (from helper loopback) both appear in the browser page's two panels
+- Auto-reconnect on WebSocket drop: exponential backoff (1s→16s, max 5 attempts)
+- Connection status indicator: green/amber/grey dot
+- Mobile responsive: single-column grid at ≤760px
+- Session code displayed with monospace teal font, Copy link button
 
-### Shared session test — PASSED (2026-06-23)
+---
 
-Two raw WebSocket clients connected simultaneously to `drk-0001`:
+## Session 1 — Pluggable Multilingual STT ✅
 
-```python
-# Both returned 101 Switching Protocols simultaneously
-t1 = ws_connect("smc-engine.ali-6b8.workers.dev", "/session/drk-0001/ws", "CLIENT-1")
-t2 = ws_connect("smc-engine.ali-6b8.workers.dev", "/session/drk-0001/ws", "CLIENT-2")
-# Result: {'CLIENT-1': 'connected', 'CLIENT-2': 'connected'}
+### Provider selection logic
+
+`worker/src/session-do.js` — `transcribeAndClean`:
+
 ```
-
-Both clients route to the same Durable Object instance. ✅  
-The DO's `_broadcast()` method broadcasts transcripts to all connected sockets. ✅
-
----
-
-## P3 — Hardened /session Page ✅ COMPLETE (Session 2)
-
-### What was built
-
-- **Auto-reconnect on WebSocket drop** — exponential backoff (1s, 2s, 4s, 8s, 16s), max 5 attempts; error banner shows countdown; reconnect is cancelled cleanly on user Stop
-- **Connection status indicator** — green dot (live), amber dot (connecting), grey dot (idle/stopped)
-- **Language selector** — 8 languages + auto-detect; selection is passed as `?lang=` to the WS URL, which the DO forwards to the STT provider
-- **Mobile responsive** — `<style>` media query collapses the two-panel grid to single column at ≤760px; no horizontal scroll; touch-sized buttons (44px+ targets)
-- **Session code displayed prominently** in a styled code box with monospace teal font
-- **Copy link button** — copies the full session URL to clipboard, shows "✓ Copied" confirmation
-- **Home link** in the top bar
-- **Error states** — orange/red banners for WS errors, reconnect progress, and mic permission failures
-- **Start/Stop** with correct disabled states
-
-### Acceptance test — PASSED (2026-06-23)
-
-```bash
-npm run build  # Passed — no errors, /session compiles as ○ (Static)
-git push origin main  # Pushed commit 83c2380
+mode='english'    → Cloudflare always
+mode='hindi-urdu' → Deepgram if key; {error:'deepgram_unavailable'} if absent
+mode='auto'       → Deepgram if key present, else Cloudflare
 ```
-
-**Vercel deployment:** `silent-meeting-copilot-ai9w4w95o-pacifictechnologygroup.vercel.app`  
-**State:** READY  
-**Commit:** `83c2380` (feat(P1-P3): pluggable STT, shared sessions, hardened session page)  
-**Site root:** Returns 401 with login HTML — auth middleware intact ✅
-
----
-
-## P4 — This file ✅
 
 ---
 
@@ -163,21 +195,31 @@ git push origin main  # Pushed commit 83c2380
 | `916b67c` | feat(helper): Windows Electron audio bridge scaffold |
 | `a7db5aa` | docs: PROGRESS.md — overnight build summary, all P1-P4 complete |
 | `83c2380` | feat(P1-P3): pluggable STT, shared sessions, hardened session page |
-
-All pushed to `origin/main`.
+| `9223ff5` | docs: PROGRESS.md — Session 2 build summary (P1-P4 complete) |
+| `77cc182` | feat(P1-P2): per-meeting language selector + per-session STT provider routing |
 
 ---
 
-## Architecture decisions
+## Architecture
 
-### STT Provider interface
+### STT Provider routing (per session, post Session 3)
 
 ```
-transcribeAndClean(audioBytes, env, lang?)
-  ├── env.DEEPGRAM_API_KEY present? → transcribeDeepgram(audio, key, lang)
-  └── absent?                       → env.AI.run('@cf/openai/whisper', {audio:[...], language?})
-  ↓ both paths
-  env.AI.run('@cf/meta/llama-3.2-3b-instruct')  ← LLM cleanup pass
+UI: mode = 'english' | 'hindi-urdu' | 'auto'
+         ↓
+WS URL: /session/:id/ws?mode=<mode>&lang=<hint>
+         ↓
+SessionDO.this.mode = mode
+         ↓
+transcribeAndClean(audio, env, lang, mode)
+  mode=english    → Cloudflare Whisper (always)
+  mode=hindi-urdu → key present: Deepgram nova-2
+                    key absent:  {error:'deepgram_unavailable'}  ← no silent fallback
+  mode=auto       → Deepgram if key, else Cloudflare
+         ↓
+LLM cleanup pass: @cf/meta/llama-3.2-3b-instruct
+         ↓
+broadcast {type:'transcript', speaker, raw, cleaned, provider}
 ```
 
 ### Session sharing
@@ -194,34 +236,18 @@ Helper enters "drk-8421" → connects to same DO → transcripts merge in browse
 
 ---
 
-## Blockers in Session 2
+## Known blockers
 
-1. **CLOUDFLARE_DEPLOY_TOKEN has surrounding quotes in env file** — token appeared as `"cfut_..."` with quotes. Fixed by adding `tr -d '"'` to strip quotes when extracting from env.
-2. **Worker deployed with `--no-bundle` previously** — the multi-file worker (`index.js` + `session-do.js`) requires bundling. Removed `--no-bundle` flag.
-3. **`ws` npm package not in project** — used Python's `ssl` + `socket` module for the two-client shared session test.
+1. **Windows helper — Windows hardware required.** WASAPI loopback audio does not work on macOS. Test with `cd helper && npm install && npm start` on a Windows 10/11 machine.
+2. **Deepgram key not yet set.** Hindi/Urdu mode is code-complete but gated. Use `wrangler secret put DEEPGRAM_API_KEY` to enable.
+3. **TOTP-protect the engine.** The Worker WebSocket endpoint currently has no auth. Anyone who discovers the URL can connect to a session. Recommended: HMAC-SHA256 session token as `Authorization: Bearer` on WS upgrade.
 
 ---
 
 ## Recommended next steps
 
-### Before next session
-
-1. **Test the /session page** — log in at the live Vercel URL, open `/session`, click Start, speak — confirm ME transcript appears with session code in header.
-2. **Test shared session end-to-end** — open `/session?s=drk-8421` in browser, set the Windows helper session code to `drk-8421`, start both — confirm OTHERS panel populates in browser when helper is running.
-3. **Test Hindi/Urdu** — to validate Deepgram path: `wrangler secret put DEEPGRAM_API_KEY`, then speak Hindi into the session and verify transcript language is preserved.
-
-### Short-term (next sprint)
-
-4. **Windows helper: test on Windows 10/11** — `cd helper && npm install && npm start`. The session code input is now on the UI. WASAPI loopback requires Windows hardware.
-
-5. **Electron build** — `npm run dist` in `helper/` produces an NSIS installer. Needs `assets/icon.ico`. Can use icoconvert.com to generate from the teal SMC logo.
-
-6. **TOTP-protect the engine** — currently the Worker has no auth. Add a shared secret header check to the WebSocket endpoint so only the authenticated web app / helper can connect. Suggested: HMAC-SHA256 of the session ID with a shared secret, sent as `Authorization: Bearer <token>` on WS upgrade.
-
-7. **Audio format optimisation** — Whisper base model may struggle with WebM/Opus chunks under 3 seconds. Consider increasing `CHUNK_MS` to 4000ms or implementing VAD flush.
-
-8. **Upgrade Whisper** — `@cf/openai/whisper-large-v3` (paid plan) gives significantly better Hindi/Urdu accuracy. Current `@cf/openai/whisper` (free) handles Hindi in testing but may mis-transcribe accented speech.
-
-9. **QR code** — add a QR code to the browser session page so the Windows machine can scan it to get the session URL automatically, eliminating the need to type the code.
-
-10. **Cleanup prompt tuning** — the Llama 3.2 3B cleanup prompt is minimal. Test with real Hindi/Urdu speech and iterate. Mixed code-switching (Hinglish) needs real-world validation.
+1. **Run `wrangler secret put DEEPGRAM_API_KEY`** — enables multilingual mode end to end
+2. **Test Hindi/Urdu** — open `/session`, select Hindi/Urdu, speak Hindi into mic, confirm Devanagari/Urdu transcript
+3. **Test shared session** — browser + Windows helper on same code
+4. **Engine auth** — add HMAC session token to WS upgrade to prevent unauthorised connections
+5. **Upgrade Whisper** — `@cf/openai/whisper-large-v3` (paid Workers AI plan) for better Hindi/Urdu accuracy on the auto-detect path
