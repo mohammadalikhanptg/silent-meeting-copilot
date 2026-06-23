@@ -1,0 +1,16 @@
+name = "smc-engine"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+account_id = "6b8a541251738b917ee0289afb8eadce"
+
+[ai]
+binding = "AI"
+
+[durable_objects]
+bindings = [
+  { name = "SESSIONS", class_name = "SessionDO" }
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SessionDO"]
