@@ -1,0 +1,30 @@
+{
+  "name": "smc-helper",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Silent Meeting Copilot — Windows desktop audio capture helper",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win --x64"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "london.pacific.smc-helper",
+    "productName": "SMC Helper",
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

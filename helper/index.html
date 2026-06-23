@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' wss: ws:; connect-src *;" />
+  <title>SMC Helper</title>
+  <style>
+    :root { --bg:#0f1115;--panel:#171a21;--border:#2a2f37;--text:#e6e8eb;--muted:#9aa0a6;--green:#22c55e;--blue:#38bdf8;--red:#ef4444;--teal:#2AB49F; }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body { background:var(--bg); color:var(--text); font-family:"Segoe UI",system-ui,sans-serif; font-size:13px; }
+    .app { padding:16px; display:flex; flex-direction:column; gap:12px; height:100vh; }
+    h1 { font-size:16px; font-weight:600; }
+    h1 small { display:block; font-size:10px; color:var(--muted); font-weight:400; margin-top:2px; }
+    .row { display:flex; align-items:center; gap:10px; }
+    .dot { width:9px;height:9px;border-radius:50%;background:#6b7280;flex-shrink:0; }
+    .dot.green { background:var(--green); }
+    .dot.amber { background:#facc15; }
+    button { border:none;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;color:#fff;cursor:pointer;background:var(--panel);border:1px solid var(--border); }
+    button.primary { background:var(--teal);border-color:var(--teal); }
+    button.danger { background:var(--red);border-color:var(--red); }
+    .meters { display:grid;grid-template-columns:1fr 1fr;gap:12px; }
+    .meter-block label { font-size:10px;color:var(--muted); }
+    .bar { height:10px;border-radius:5px;background:var(--panel);border:1px solid var(--border);margin-top:4px;overflow:hidden; }
+    .bar span { display:block;height:100%;width:0;transition:width 80ms linear; }
+    .bar.me span { background:var(--green); }
+    .bar.ot span { background:var(--blue); }
+    .log { flex:1;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:8px;overflow-y:auto;font-size:11px;line-height:1.6;color:var(--muted);font-family:monospace;white-space:pre-wrap;min-height:80px; }
+    select { background:var(--panel);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 8px;font-size:12px; }
+    .url { font-size:10px;color:var(--muted);word-break:break-all; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="row">
+      <h1>SMC Helper <small>Silent Meeting Copilot — Windows audio bridge</small></h1>
+    </div>
+
+    <div class="row">
+      <label style="font-size:11px;color:var(--muted)">Microphone:</label>
+      <select id="micSel" style="flex:1"></select>
+      <button id="refreshBtn" onclick="listDevices()">↻</button>
+    </div>
+
+    <div class="row">
+      <div class="dot" id="statusDot"></div>
+      <span id="statusText" style="color:var(--muted)">Idle</span>
+      <button class="primary" id="startBtn">Start</button>
+      <button class="danger" id="stopBtn" disabled>Stop</button>
+    </div>
+
+    <div class="meters">
+      <div class="meter-block">
+        <label>ME (microphone)</label>
+        <div class="bar me"><span id="barMe"></span></div>
+      </div>
+      <div class="meter-block">
+        <label>OTHERS (system loopback)</label>
+        <div class="bar ot"><span id="barOt"></span></div>
+      </div>
+    </div>
+
+    <div class="log" id="log"></div>
+    <div class="url" id="engineUrl"></div>
+  </div>
+  <script src="renderer.js"></script>
+</body>
+</html>
