@@ -2,6 +2,7 @@ import { redirect, notFound } from 'next/navigation';
 import { getSessionPayload } from '../../lib/auth';
 import { getSql } from '../../lib/db';
 import MinutesPanel from './MinutesPanel';
+import ThemeToggle from '../../components/ThemeToggle';
 
 export const dynamic = 'force-dynamic';
 
@@ -75,20 +76,20 @@ export default async function MeetingDetailPage({ params }) {
     <main style={styles.root}>
       {/* Header */}
       <div style={styles.header}>
-        <div>
-          <a href="/meetings" style={styles.back}>&larr; All meetings</a>
+        <div style={{ flex: 1 }}>
+          <a href="/meetings" style={styles.back}>&larr; All sessions</a>
           <h1 style={styles.title}>{meeting.title || 'Untitled session'}</h1>
           <div style={styles.meta}>
             {formatDate(meeting.started_at)}
             {meeting.ended_at && ` — ${formatDate(meeting.ended_at)}`}
             &nbsp;&middot;&nbsp;
-            <span style={{ textTransform: 'uppercase', fontSize: 10, color: '#38bdf8' }}>
+            <span style={{ textTransform: 'uppercase', fontSize: 10, color: 'var(--others)' }}>
               {meeting.language_mode || 'english'}
             </span>
             {clarifiedCount > 0 && (
               <>
                 &nbsp;&middot;&nbsp;
-                <span style={{ fontSize: 10, color: '#34d399' }}>
+                <span style={{ fontSize: 10, color: 'var(--me)' }}>
                   {clarifiedCount} turn{clarifiedCount !== 1 ? 's' : ''} clarified
                 </span>
               </>
@@ -98,11 +99,12 @@ export default async function MeetingDetailPage({ params }) {
             <div style={styles.objective}>Objective: {meeting.objective}</div>
           )}
           {meeting.context_notes && (
-            <div style={{ ...styles.objective, color: '#6b7280', marginTop: 2 }}>
+            <div style={{ ...styles.objective, color: 'var(--tx-3)', marginTop: 2 }}>
               Context: {meeting.context_notes}
             </div>
           )}
         </div>
+        <ThemeToggle />
       </div>
 
       {/* Final coaching summary */}

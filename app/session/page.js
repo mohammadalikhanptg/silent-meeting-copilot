@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
+import ThemeToggle from '../components/ThemeToggle';
 
 const ENGINE_URL = process.env.NEXT_PUBLIC_ENGINE_URL || 'https://smc-engine.ali-6b8.workers.dev';
 const CHUNK_MS = 2500;
@@ -752,12 +753,14 @@ export default function SessionPage() {
             <code style={styles.code}>{sessionCode || '…'}</code>
             <button
               onClick={copyLink}
-              style={{ ...styles.smallBtn, background: copied ? '#166534' : '#2a2f37' }}
+              style={{ ...styles.smallBtn, background: copied ? '#166534' : 'var(--bg-raised)' }}
               title="Copy shareable session link"
             >
               {copied ? '✓ Copied' : 'Copy link'}
             </button>
           </div>
+
+          <ThemeToggle />
 
           <div className="smc-controls" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>

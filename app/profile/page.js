@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import ThemeToggle from '../components/ThemeToggle';
 
 const GUIDE_PROMPT = `I need your help writing an "about me" document I can paste into an AI meeting copilot as my always-on coaching context.
 
@@ -228,6 +229,7 @@ export default function ProfilePage() {
               Fields left blank will not generate cards. Phone, address, and bio are yours to fill in.
             </p>
           </div>
+          <ThemeToggle />
         </div>
 
         {error && <div style={styles.errorBox}>{error}</div>}
