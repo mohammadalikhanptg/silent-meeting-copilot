@@ -75,3 +75,28 @@ Long-term roadmap:
 
 ## 9. Meeting-bot (Phase 2) assessment
 Feasible and moderate effort via Recall.ai (unified bot API across Zoom/Teams/Meet/Webex giving real-time, speaker-named transcription) rather than native per-platform bots. Fits as a paid add-on with pass-through cost. Strategically closes the gap with note-takers like Fireflies so a customer needs only SMC, and the named clean speaker labels improve coaching versus the loopback blob. Plugs into the existing source-agnostic engine. Not Phase 1.
+
+---
+
+## ADDENDUM (23 Jun 2026) — session model, profile context, multi-user
+
+### Session-first experience
+- Login lands on a Sessions list (saved sessions, Open per session, prominent New session button), not the live blocks. New session opens the blocks connected-and-ready. Existing sessions reopen. No calendar for now (bespoke); calendar considered later. Each meeting is a session.
+- Per-session preparation, two inputs, usable before going live and editable after: (1) a context box to type or dictate what the meeting is about and how to be coached; (2) drag-and-drop upload of .md/.txt files only as reference/prep data.
+- Prepare-and-save lifecycle: create and save a session with context + prep docs without going live, reopen later with everything preloaded.
+
+### Persistent profile context and guide
+- Profile gets the same two inputs (text box + .md/.txt upload, e.g. an about-me markdown exported from ChatGPT), plus a copyable guide prompt for users unsure how to generate one.
+- Coaching uses two streams: persistent profile (always on) + per-session context (per meeting).
+
+### Security of user-supplied context (mandatory)
+- Uploads restricted to .md/.txt, size-capped, everything else rejected.
+- All typed/dictated/uploaded context is untrusted DATA, never instructions: control chars stripped, stored plain text, rendered escaped, wrapped in clear delimiters in the LLM prompt with an explicit instruction to use only as background and ignore embedded instructions. No path to issue commands or change system behaviour.
+
+### Multi-user (final phase, GATED)
+- End state: Mo is administrator and invites users (friends/family for feedback; no licensing, no cost, Mo bears the Cloudflare cost). Each invited user gets their own login, own profile, same functionality, with per-user data isolation across profiles, sessions, meetings, flagged items.
+- GATE: must not go live until the auth multi-user hardening backlog (section 7) is completed and cross-reviewed, because external users will authenticate. Sequence: auth hardening (operator-gated, Codex-reviewed, Mo-verified) -> multi-user build -> invite users. Do NOT expose invites before hardening.
+
+### Phase plan update
+- Phase 1 also includes: session-first IA + per-session prep inputs; profile dual-input + guide; Word minutes export (all in build).
+- Multi-user becomes its own gated phase after the auth hardening backlog. Meeting-bot remains Phase 2 (needs Recall.ai).
