@@ -1,4 +1,4 @@
-import { SessionDO, transcribeAndClean, generateCoaching } from './session-do.js';
+import { SessionDO, transcribeAndClean, generateCoaching, enrichFlaggedItem } from './session-do.js';
 
 export { SessionDO };
 
@@ -58,6 +58,21 @@ export default {
         return json({ ok: true, ...result });
       } catch (err) {
         console.error('Coach error:', err);
+        return json({ error: String(err) }, 500);
+      }
+    }
+
+    // POST /enrich-flag — secondary pipeline: LLM help + search for a flagged transcript item
+    // Body: {text, speaker, context?, profile?}
+    // Returns: {ok, assist_text, references}
+    // Called by the Next.js /api/flagged-items/[id]/process route (fire-and-forget from client)
+    if (url.pathname === '/enrich-flag' && request.method === 'POST') {
+      try {
+        const body = await request.json();
+        const result = await enrichFlaggedItem(body, env);
+        return json({ ok: true, ...result });
+      } catch (err) {
+        console.error('Enrich-flag error:', err);
         return json({ error: String(err) }, 500);
       }
     }

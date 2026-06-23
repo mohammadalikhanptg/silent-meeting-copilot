@@ -9,12 +9,12 @@ export async function POST(request) {
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const body = await request.json().catch(() => ({}));
-  const { title, objective, language_mode } = body;
+  const { title, objective, language_mode, context_notes } = body;
 
   const sql = getSql();
   const [row] = await sql`
-    INSERT INTO meetings (user_email, title, objective, language_mode)
-    VALUES (${session.email}, ${title || null}, ${objective || null}, ${language_mode || null})
+    INSERT INTO meetings (user_email, title, objective, language_mode, context_notes)
+    VALUES (${session.email}, ${title || null}, ${objective || null}, ${language_mode || null}, ${context_notes || null})
     RETURNING id
   `;
 

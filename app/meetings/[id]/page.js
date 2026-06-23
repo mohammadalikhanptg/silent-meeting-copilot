@@ -47,6 +47,13 @@ export default async function MeetingDetailPage({ params }) {
     ORDER BY ts
   `;
 
+  const flaggedItems = await sql`
+    SELECT id, speaker, text, ts, status, assist_text, reference_json, addressed_at
+    FROM flagged_items
+    WHERE meeting_id = ${id}
+    ORDER BY ts
+  `;
+
   // Coaching uses corrected OTHERS text where available
   const me = segments.filter(s => s.speaker === 'me').map(s => s.cleaned);
   const others = segments
@@ -81,6 +88,11 @@ export default async function MeetingDetailPage({ params }) {
           </div>
           {meeting.objective && (
             <div style={styles.objective}>Objective: {meeting.objective}</div>
+          )}
+          {meeting.context_notes && (
+            <div style={{ ...styles.objective, color: '#6b7280', marginTop: 2 }}>
+              Context: {meeting.context_notes}
+            </div>
           )}
         </div>
       </div>
@@ -149,6 +161,69 @@ export default async function MeetingDetailPage({ params }) {
                 <div style={{ fontSize: 13, color: '#fbbf24' }}>{coaching.alignment}</div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Flagged items — follow-up tracker review */}
+      {flaggedItems.length > 0 && (
+        <div style={styles.followUpSection}>
+          <div style={styles.followUpTitle}>Follow-up Tracker ({flaggedItems.length} flagged)</div>
+          <div style={styles.followUpGrid}>
+            {/* Left: Talking Points */}
+            <div style={styles.followUpCol}>
+              <div style={styles.followUpColHead}>Talking Points</div>
+              {flaggedItems.map((item, idx) => (
+                <div key={item.id} style={{ ...styles.tpItem, opacity: item.addressed_at ? 0.5 : 1 }}>
+                  <span style={styles.tpNum}>{idx + 1}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={styles.tpQuote}>&ldquo;{item.text}&rdquo;</div>
+                    <div style={styles.tpMeta}>
+                      {item.speaker === 'others' ? 'OTHERS' : 'ME'} &middot; {new Date(item.ts).toLocaleTimeString()}
+                      {item.addressed_at && <span style={{ color: '#4ade80', marginLeft: 8 }}>✓ Addressed</span>}
+                    </div>
+                    {item.assist_text && (
+                      <div style={styles.tpAssist}>{item.assist_text}</div>
+                    )}
+                    {!item.assist_text && item.status !== 'enriched' && (
+                      <div style={{ fontSize: 12, color: '#4b5563', fontStyle: 'italic' }}>
+                        {item.status === 'processing' ? 'Processing…' : 'Not yet enriched'}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {/* Right: References */}
+            <div style={styles.followUpCol}>
+              <div style={{ ...styles.followUpColHead, color: '#60a5fa' }}>References</div>
+              {flaggedItems.map((item, idx) => {
+                const refs = item.reference_json || [];
+                return (
+                  <div key={item.id} style={styles.refItem}>
+                    <span style={{ ...styles.tpNum, borderColor: '#1e3a5f', color: '#60a5fa', background: '#0c1f33' }}>{idx + 1}</span>
+                    <div style={{ flex: 1 }}>
+                      {refs.length > 0 ? refs.map((r, ri) => (
+                        <div key={ri} style={{ marginBottom: 6 }}>
+                          <a href={r.url} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: '#60a5fa', textDecoration: 'none' }}>{r.title}</a>
+                          {r.snippet && <div style={{ fontSize: 11, color: '#6b7280', lineHeight: 1.4 }}>{r.snippet}</div>}
+                        </div>
+                      )) : (
+                        <div style={{ fontSize: 12, color: '#374151' }}>
+                          <a
+                            href={`https://www.google.com/search?q=${encodeURIComponent(item.text.slice(0, 60))}`}
+                            target="_blank" rel="noreferrer"
+                            style={{ color: '#60a5fa' }}
+                          >
+                            Search Google
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
@@ -281,6 +356,17 @@ const styles = {
   speakerTag: { fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', minWidth: 46, flexShrink: 0 },
   segTs: { fontSize: 10, color: '#6b7280', flexShrink: 0 },
   segText: { fontSize: 13, lineHeight: 1.5 },
+  followUpSection: { background: '#0b1017', border: '1px solid #1e3a2b', borderRadius: 12, overflow: 'hidden', marginBottom: 4 },
+  followUpTitle: { fontSize: 13, fontWeight: 600, color: '#4ade80', padding: '10px 16px', borderBottom: '1px solid #1e3a2b' },
+  followUpGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 },
+  followUpCol: { padding: 14, borderRight: '1px solid #1a2a1e', display: 'flex', flexDirection: 'column', gap: 10 },
+  followUpColHead: { fontSize: 11, fontWeight: 600, color: '#4ade80', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 },
+  tpItem: { display: 'flex', gap: 8, padding: '8px 10px', background: '#111a14', borderRadius: 6, border: '1px solid #1e4d2b' },
+  refItem: { display: 'flex', gap: 8, padding: '8px 10px', minHeight: 40 },
+  tpNum: { fontSize: 10, fontWeight: 700, color: '#4ade80', background: '#052e16', border: '1px solid #166534', borderRadius: 4, padding: '1px 5px', height: 18, flexShrink: 0, display: 'flex', alignItems: 'center' },
+  tpQuote: { fontSize: 13, color: '#d1d5db', fontStyle: 'italic', marginBottom: 2 },
+  tpMeta: { fontSize: 10, color: '#6b7280', marginBottom: 4 },
+  tpAssist: { fontSize: 12, color: '#86efac', lineHeight: 1.5, whiteSpace: 'pre-wrap' },
   clarifiedBadge: {
     fontSize: 9,
     fontWeight: 700,

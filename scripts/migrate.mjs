@@ -34,6 +34,22 @@ try {
     updated_at    timestamptz NOT NULL DEFAULT now()
   )`;
   await sql`CREATE INDEX IF NOT EXISTS idx_user_profiles_email ON user_profiles (user_email)`;
+  // Session 7 P4: per-meeting context/agenda notes
+  await sql`ALTER TABLE meetings ADD COLUMN IF NOT EXISTS context_notes text`;
+  // Session 7 P1: flagged items for follow-up tracker
+  await sql`CREATE TABLE IF NOT EXISTS flagged_items (
+    id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    meeting_id     uuid NOT NULL REFERENCES meetings(id),
+    source_segment uuid REFERENCES transcript_segments(id),
+    speaker        text NOT NULL,
+    text           text NOT NULL,
+    ts             timestamptz NOT NULL DEFAULT now(),
+    status         text NOT NULL DEFAULT 'pending',
+    assist_text    text,
+    reference_json jsonb,
+    addressed_at   timestamptz
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_flagged_meeting ON flagged_items (meeting_id, ts)`;
   console.log('[migrate] ok');
 } catch (e) {
   console.error('[migrate] failed:', e.message);

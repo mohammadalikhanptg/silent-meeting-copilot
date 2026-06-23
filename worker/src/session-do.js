@@ -607,6 +607,106 @@ async function generateAssists(recentMe, recentOthers, profile, env) {
   return cards;
 }
 
+// ---------------------------------------------------------------------------
+// Session 7 P3 — Flag enrichment: LLM talking-point help + optional search
+// ---------------------------------------------------------------------------
+
+// Enrich a flagged transcript item with a suggested response and online references.
+// Called by POST /enrich-flag on the worker (secondary, non-blocking pipeline).
+export async function enrichFlaggedItem({ text, speaker, context = '', profile = null }, env) {
+  // Build a brief profile facts section for the LLM
+  const profileFacts = [];
+  if (profile) {
+    for (const biz of (profile.businesses || [])) {
+      if (biz.name) {
+        profileFacts.push(`Business: ${biz.name}${biz.website ? ` (${biz.website})` : ''}`);
+      }
+    }
+    if (profile.bio) profileFacts.push(`Bio: ${profile.bio}`);
+    for (const item of (profile.common_items || [])) {
+      if (item.label && item.value) profileFacts.push(`${item.label}: ${item.value}`);
+    }
+    for (const em of (profile.emails || [])) {
+      if (em.value) profileFacts.push(`${em.label || 'Email'}: ${em.value}`);
+    }
+  }
+
+  const profileSection = profileFacts.length > 0
+    ? `\nOperator profile:\n${profileFacts.map(f => `- ${f}`).join('\n')}`
+    : '';
+  const contextSection = context ? `\nMeeting context: ${context}` : '';
+  const speakerLabel = speaker === 'me' ? 'the operator' : 'another participant';
+
+  const prompt = `During a meeting, ${speakerLabel} said: "${text}"
+${contextSection}${profileSection}
+
+This point has been flagged. The operator may have 15-20 minutes before their turn to respond.
+
+Return a JSON object with exactly these fields:
+{
+  "suggested_response": "<specific, actionable 1-2 sentence response the operator can use>",
+  "profile_relevance": "<if operator profile facts are directly relevant to this point, state them briefly; otherwise empty string>"
+}
+
+Return ONLY the JSON object, no preamble.`;
+
+  let assist_text = '';
+  try {
+    const llmResult = await env.AI.run('@cf/meta/llama-3.2-3b-instruct', {
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a meeting assistant. The operator has flagged a talking point from a meeting. Help them prepare a response.',
+        },
+        {
+          role: 'user',
+          content: prompt + '\n\nRespond ONLY with the JSON object. Start your response with { and end with }.',
+        },
+      ],
+      max_tokens: 400,
+    });
+
+    // Workers AI returns response as a string OR as an already-parsed object.
+    // Normalise to handle both cases.
+    const rawResponse = llmResult.response;
+    let parsed = null;
+    if (rawResponse && typeof rawResponse === 'object') {
+      // Workers AI returned a parsed object directly — use it
+      parsed = rawResponse;
+    } else {
+      const responseText = (typeof rawResponse === 'string' ? rawResponse : '').trim();
+      if (responseText) {
+        try {
+          const match = responseText.match(/\{[\s\S]*?\}/);
+          if (match) parsed = JSON.parse(match[0]);
+        } catch (_) {}
+        // Fallback: use raw text if JSON didn't parse
+        if (!parsed && responseText.length > 10) {
+          assist_text = responseText.replace(/```[\s\S]*?```/g, '').trim().slice(0, 400);
+        }
+      }
+    }
+
+    if (parsed) {
+      const parts = [];
+      if (parsed.suggested_response) parts.push(String(parsed.suggested_response).trim());
+      if (parsed.profile_relevance) parts.push(`Relevant to you: ${String(parsed.profile_relevance).trim()}`);
+      assist_text = parts.filter(Boolean).join('\n\n');
+    }
+  } catch (_) {
+    assist_text = '';
+  }
+
+  // Search for references about the flagged topic (Brave Search, same key as live assist)
+  let references = [];
+  if (env.SEARCH_API_KEY) {
+    const query = text.replace(/['"]/g, '').slice(0, 80);
+    references = await fetchBraveResults(query, env.SEARCH_API_KEY);
+  }
+
+  return { assist_text, references };
+}
+
 // Generate live coaching from accumulated ME/OTHERS transcript lines.
 // Called by POST /coach. Returns structured coaching object.
 //
