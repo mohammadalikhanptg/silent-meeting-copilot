@@ -172,3 +172,18 @@ Mode 2 — Customer service mode:
 
 ### G. Cross-review record
 correlationId cr-smc-remote-control-arch-20260624. Verdict APPROVE-WITH-CHANGES. Codex confirmed the direction and proposed no change of direction. Anti-drift gate did not fire. Six of my own recommendations were adopted (five agreed, one upgraded to lease-based); one was reversed on the merits (keep the free Whisper English path rather than standardising on nova-3); the rest were Codex additions folded into the v1 hardening list.
+
+### H. Interview-mode export and session-start compliance (operator additions, 24 Jun)
+- Interview mode must produce a downloadable pack after the interview: the full timestamped transcript (the system-suggested questions and the candidate answers) plus the guidance and the green/red verdict with the evidence behind it. The verdict is guidance only and the recruiter decides. The pack is structured so a human or another LLM can independently re-verify the judgement after the fact. The system never needs to be taken at its word.
+- Every session begins with a clear notice and acknowledgement that the meeting may be transcribed and analysed by AI for assistance, quality or assessment purposes, and a reminder that ensuring lawful consent and compliance with local law is the user's own responsibility. The user acknowledges before the session goes live. This applies to all modes and matters most for interview and customer service modes, where a third party is being recorded and assessed.
+
+### I. Build execution model (operator instruction, 24 Jun)
+This roadmap is the single driver. The v1 build proceeds in ordered waves; each wave completes one or more milestones, which are marked done in this document and in the Sanity project record as they land, so progress is always visible and the roadmap is driven to completion as fast as is safe. Operator tests once v1 is fully built, not wave by wave.
+
+v1 build wave order (each maps to milestones in section B and the Sanity record):
+1. Wave 1 (engine, safe/migration-ordered): split internal Bearer secret (INTERNAL_SHARED_SECRET), enrich and shorten the browser token, leave key/token signing secret untouched so existing pairing keys keep working. [milestone r6]
+2. Wave 2 (engine): Durable Object safety controls: lease-based capture, one active helper election with audio rejection from non-active helpers, capture authorisation, session epochs, session status active/paused/ended. [milestones r5, part of r4]
+3. Wave 3 (helper client): daemon rewrite: connect on launch, standby, capture on command, drop session code and manual start/stop, clear state including not-active-helper, mic hot-swap, heartbeat and backoff reconnect, client-side silence gating. [milestones r3, r7]
+4. Wave 4 (browser cockpit): drop session code, Start/Stop drives the helper, helper-connected status and deaf warning, ME-only fallback, home-screen paused sessions and resume, start-of-session compliance acknowledgement. [milestones r3, r4, r8]
+5. Wave 5 (modes framework + interview mode): session-profile abstraction; interview mode (resume + expectations in, system-driven questioning, live answer verification, cross-questioning, green/red verdict, downloadable evidence pack). [milestones m1, m2, m5]
+6. Wave 6: customer service mode; then CRM integration. [milestones m3, m4]
