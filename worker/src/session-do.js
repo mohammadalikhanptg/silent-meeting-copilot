@@ -29,8 +29,30 @@ export class SessionDO {
     this.state.acceptWebSocket(server);
     // Hibernation-safe per-socket state.
     server.serializeAttachment({ lang, mode, role });
-    // Let connected browsers know whether a helper is now feeding this session,
-    // so they can suppress their own mic capture (see double-capture guard below).
+
+    // The browser cockpit's connect-time mode/lang becomes the session default.
+    if (role === 'browser' && (mode || lang)) {
+      await this.state.storage.put({ mode: mode || 'auto', lang: lang || null });
+    }
+
+    const capturing = (await this.state.storage.get('capturing')) === true;
+    if (role === 'helper') {
+      // Helper (re)connected; if a session is already live, start it immediately.
+      if (capturing) {
+        const sess = await this.state.storage.get(['mode', 'lang']);
+        try {
+          server.send(JSON.stringify({
+            type: 'capture', action: 'start',
+            mode: sess.get('mode') || 'auto',
+            lang: sess.has('lang') ? sess.get('lang') : null,
+          }));
+        } catch (_) {}
+      }
+    } else {
+      // Cockpit: report whether a helper is attached and whether we are live.
+      try { server.send(JSON.stringify({ type: 'helper_status', connected: this._helperConnected(), capturing })); } catch (_) {}
+    }
+
     this._broadcastHelperStatus();
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -63,6 +85,37 @@ export class SessionDO {
           if (ctrl.lang !== undefined) next.lang = ctrl.lang || null;
           if (ctrl.mode !== undefined) next.mode = ctrl.mode || 'auto';
           ws.serializeAttachment(next);
+          // A browser sets the session-wide mode/lang used to transcribe ALL audio
+          // (including the helper's), and pushes it to a live helper.
+          if (role === 'browser') {
+            const patch = {};
+            if (ctrl.mode !== undefined) patch.mode = ctrl.mode || 'auto';
+            if (ctrl.lang !== undefined) patch.lang = ctrl.lang || null;
+            if (Object.keys(patch).length) await this.state.storage.put(patch);
+            if ((await this.state.storage.get('capturing')) === true) {
+              const sess = await this.state.storage.get(['mode', 'lang']);
+              this._sendToHelpers({ type: 'capture', action: 'config',
+                mode: sess.get('mode') || 'auto',
+                lang: sess.has('lang') ? sess.get('lang') : null });
+            }
+          }
+        } else if (ctrl.type === 'control' && role === 'browser') {
+          // Cockpit start/stop drives the helper(s).
+          if (ctrl.action === 'start') {
+            const patch = { capturing: true };
+            if (ctrl.mode !== undefined) patch.mode = ctrl.mode || 'auto';
+            if (ctrl.lang !== undefined) patch.lang = ctrl.lang || null;
+            await this.state.storage.put(patch);
+            const sess = await this.state.storage.get(['mode', 'lang']);
+            this._sendToHelpers({ type: 'capture', action: 'start',
+              mode: sess.get('mode') || 'auto',
+              lang: sess.has('lang') ? sess.get('lang') : null });
+            this._broadcast({ type: 'session_state', capturing: true, helperConnected: this._helperConnected() });
+          } else if (ctrl.action === 'stop') {
+            await this.state.storage.put({ capturing: false });
+            this._sendToHelpers({ type: 'capture', action: 'stop' });
+            this._broadcast({ type: 'session_state', capturing: false, helperConnected: this._helperConnected() });
+          }
         }
         return;
       }
@@ -80,7 +133,12 @@ export class SessionDO {
       if (speaker === 'me' && role === 'browser' && this._helperConnected()) return;
 
       const audio = bytes.slice(1);
-      const result = await transcribeAndClean(audio, this.env, lang, mode);
+      // Transcribe with the session-wide mode/lang chosen by the browser cockpit,
+      // so the helper's audio uses the operator's language, not its connect default.
+      const sess = await this.state.storage.get(['mode', 'lang']);
+      const useMode = sess.get('mode') || mode || 'auto';
+      const useLang = sess.has('lang') ? sess.get('lang') : (lang ?? null);
+      const result = await transcribeAndClean(audio, this.env, useLang, useMode);
       if (result.error === 'deepgram_unavailable') {
         // Notify client explicitly — do NOT silently fall back to English.
         this._broadcast({
@@ -111,6 +169,16 @@ export class SessionDO {
     const text = JSON.stringify(msg);
     for (const ws of this.state.getWebSockets()) {
       try { ws.send(text); } catch (_) {}
+    }
+  }
+
+  _sendToHelpers(msg) {
+    const text = JSON.stringify(msg);
+    for (const ws of this.state.getWebSockets()) {
+      const att = ws.deserializeAttachment();
+      if (att && att.role === 'helper') {
+        try { ws.send(text); } catch (_) {}
+      }
     }
   }
 }

@@ -237,3 +237,36 @@ export function verifyHelperKeyHmac(key) {
   }
   return decoded;
 }
+
+// ── Browser session token (engine WebSocket auth) ─────────────────────────────
+// Short-lived, HMAC-signed token issued to a logged-in user so the browser can
+// authenticate directly to the Cloudflare engine WS (which routes by email).
+export function generateSessionToken(email, ttlSec = 12 * 60 * 60) {
+  const payload = Buffer.from(
+    JSON.stringify({ u: email, exp: Math.floor(Date.now() / 1000) + ttlSec })
+  ).toString('base64url');
+  const sig = crypto.createHmac('sha256', helperSigningSecret()).update(payload).digest('base64url');
+  return `smcs1_${payload}.${sig}`;
+}
+
+export function verifySessionToken(token) {
+  if (!token || typeof token !== 'string' || !token.startsWith('smcs1_')) return null;
+  const rest = token.slice(6);
+  const dot = rest.lastIndexOf('.');
+  if (dot < 1) return null;
+  const payload = rest.slice(0, dot);
+  const sig = rest.slice(dot + 1);
+  const expected = crypto.createHmac('sha256', helperSigningSecret()).update(payload).digest('base64url');
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return null;
+  try { if (!crypto.timingSafeEqual(a, b)) return null; } catch { return null; }
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (!parsed.u || !parsed.exp) return null;
+    if (parsed.exp < Math.floor(Date.now() / 1000)) return null;
+    return { email: parsed.u, exp: parsed.exp };
+  } catch {
+    return null;
+  }
+}

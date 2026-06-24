@@ -44,6 +44,46 @@ async function validateHelperKey(key, sessionCode, env) {
   }
 }
 
+// Validate a browser session token (issued by the app to a logged-in user).
+async function validateSessionToken(token, env) {
+  const secret = env.HELPER_SIGNING_SECRET;
+  if (!secret) return { valid: false, reason: 'server misconfigured' };
+  if (!token) return { valid: false, reason: 'missing token' };
+  const appUrl = env.APP_BASE_URL || 'https://silent-meeting-copilot.vercel.app';
+  const validateUrl = new URL(`${appUrl}/api/internal/validate-session-token`);
+  validateUrl.searchParams.set('token', token);
+  try {
+    const res = await fetch(validateUrl.toString(), {
+      headers: { Authorization: `Bearer ${secret}` },
+      cf: { cacheTtl: 0 },
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      return { valid: false, reason: body.reason || 'validation failed' };
+    }
+    return await res.json();
+  } catch (err) {
+    console.error('validateSessionToken fetch error:', err);
+    return { valid: false, reason: 'validation service unreachable' };
+  }
+}
+
+// One Durable Object per user (email-derived). Browser and helper both land here,
+// so no session code is needed.
+function userDoId(env, email) {
+  return env.SESSIONS.idFromName('u:' + String(email).toLowerCase());
+}
+
+// Accept the socket only to deliver a clean auth_error, then close it.
+function wsAuthError(reason) {
+  const pair = new WebSocketPair();
+  const [client, server] = Object.values(pair);
+  server.accept();
+  try { server.send(JSON.stringify({ type: 'auth_error', reason: reason || 'unauthorized' })); } catch (_) {}
+  server.close(4401, reason || 'unauthorized');
+  return new Response(null, { status: 101, webSocket: client });
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -117,6 +157,40 @@ export default {
         console.error('Minutes error:', err);
         return json({ error: String(err) }, 500);
       }
+    }
+
+    // ── Email-routed endpoints (no session code) ──────────────────────────────
+    // Helper standby: connects on launch with just the pairing key. The engine
+    // routes it into the user's personal session DO; it captures only when the
+    // browser cockpit tells it to (control relay lives in the DO).
+    if (url.pathname === '/helper/ws') {
+      if (request.headers.get('Upgrade') !== 'websocket') {
+        return json({ error: 'Expected WebSocket upgrade' }, 426);
+      }
+      const key = url.searchParams.get('key');
+      const v = await validateHelperKey(key, null, env);
+      if (!v.valid) return wsAuthError(v.reason);
+      const authedUrl = new URL(request.url);
+      authedUrl.searchParams.set('role', 'helper');
+      authedUrl.searchParams.set('_authed_email', v.email);
+      const stub = env.SESSIONS.get(userDoId(env, v.email));
+      return stub.fetch(new Request(authedUrl, request));
+    }
+
+    // Browser cockpit: connects with a short-lived session token. Same DO as the
+    // user's helper, so they meet automatically.
+    if (url.pathname === '/app/ws') {
+      if (request.headers.get('Upgrade') !== 'websocket') {
+        return json({ error: 'Expected WebSocket upgrade' }, 426);
+      }
+      const token = url.searchParams.get('token');
+      const v = await validateSessionToken(token, env);
+      if (!v.valid) return wsAuthError(v.reason);
+      const authedUrl = new URL(request.url);
+      authedUrl.searchParams.set('role', 'browser');
+      authedUrl.searchParams.set('_authed_email', v.email);
+      const stub = env.SESSIONS.get(userDoId(env, v.email));
+      return stub.fetch(new Request(authedUrl, request));
     }
 
     // GET /session/:id/ws — WebSocket upgrade routed to Durable Object
