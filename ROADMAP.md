@@ -100,3 +100,75 @@ Feasible and moderate effort via Recall.ai (unified bot API across Zoom/Teams/Me
 ### Phase plan update
 - Phase 1 also includes: session-first IA + per-session prep inputs; profile dual-input + guide; Word minutes export (all in build).
 - Multi-user becomes its own gated phase after the auth hardening backlog. Meeting-bot remains Phase 2 (needs Recall.ai).
+
+---
+
+## ADDENDUM (24 Jun 2026) — remote-control redesign (cross-reviewed), session suspend/resume, transcription decisions, and MODES vision
+
+This addendum supersedes the relevant earlier sections where they conflict. It is the authoritative v1 design record as of 24 Jun 2026.
+
+### A. Engine corrections (supersede the STT lines in section 2)
+- Transcription paths: English uses Cloudflare Workers AI Whisper (free, no diarization). Hindi/Urdu/auto use Deepgram nova-3 hosted ON Cloudflare Workers AI via the AI binding. There is NO external Deepgram account or key any more. Both providers sit behind one interface.
+- Decision (cross-reviewed): KEEP the free Whisper English path. Do NOT standardise on paid nova-3 yet. Add cost instrumentation (minutes by mode/provider/channel) and revisit only if measured data justifies the change.
+- Live assist/search uses Brave Search (independent index, free tier). Google has no usable general web-search API for this and the Bing Search API retired Aug 2025.
+- Helper now builds for Windows AND macOS via GitHub Actions (release tag helper-latest).
+
+### B. Remote-control redesign (the new session model) — CROSS-REVIEWED, APPROVED
+Cross-reviewed via Codex on 24 Jun 2026. Verdict APPROVE-WITH-CHANGES. Direction confirmed: a per-user Durable Object control plane is the right v1 model; do NOT pivot to WebRTC/SFU or a heavier session service before v1. Anti-drift gate did not fire. correlationId cr-smc-remote-control-arch-20260624 (wfEvent recorded in Sanity).
+
+Core model:
+- No session code anywhere. Identity comes from login (browser) and the pairing key (helper); both resolve to ONE Durable Object per user.
+- The helper is a background agent (daemon): connects on launch, sits in standby, captures only when the engine commands it.
+- The browser cockpit Start/Stop remotely drives the helper via a control relay inside the Durable Object.
+- One live session per account.
+
+v1 hardening requirements (agreed from the cross-review; to build in the client wave):
+1. Lease-based capture. Capture continues only while a cockpit is present and renews a lease every 30 to 60 seconds. If presence cannot be proven, capture stops (see lifecycle in C).
+2. One active helper per account, enforced in the Durable Object. A second helper demotes the older one (newest-wins, made visible). The engine rejects audio from any non-active helper. The helper gains a fourth state: connected but not the active helper.
+3. Durable-Object-enforced capture authorisation. The engine accepts audio only when capturing is true, the lease is valid, the sender is the active helper, and the session epoch is current. Clients never self-authorise.
+4. Split secrets. A dedicated INTERNAL_SHARED_SECRET for the worker-to-app Bearer, separate from the key/token signing secret. The previous triple-duty secret caused a real outage. Enrich tokens with audience, type, issued-at, expiry and a replay id (jti or session epoch).
+5. Short browser WS token TTL (about 15 minutes) with auto-refresh, replacing the 12h token. Helper pairing keys stay long-lived but carry a device id for future per-device revocation.
+6. Client-side silence gating in the helper (RMS with hysteresis, minimum speech duration, pre-roll and post-roll, gated independently per channel) so silence is never uploaded or transcribed. This is the biggest recurring-cost lever.
+7. Helper daemon resilience. Heartbeat every 20 to 30 seconds, socket considered stale after about 2 missed intervals, reconnect with exponential backoff plus jitter (about 1, 2, 5, 10, 30, capped near 60 seconds). Session epochs so stale sockets cannot inject audio. On reconnect the helper reports device id, capabilities and selected mic, and the Durable Object returns authoritative state.
+8. Address the Durable Object by a stable internal user id where available (email canonicalisation is not always sufficient). Segment duration becomes a config constant.
+
+Deferred (not v1): per-device key revocation UI (device id is added now, UI later); full metrics dashboards (basic counters now).
+
+### C. Decision 1 — session suspend/resume lifecycle (operator decision, 24 Jun)
+- Session states: active, paused, ended.
+- When the last cockpit closes, after a short grace of about 20 to 30 seconds (to survive an accidental refresh or brief network blip), the session SUSPENDS. The helper drops to standby, capture pauses, and the full session (transcript so far, context, mode and language) is preserved.
+- The home screen lists paused sessions. Re-entering a paused session and pressing Resume restarts streaming and the helper resumes flowing data.
+- The 3 hour hard cap remains as a safety backstop.
+- This replaces the earlier auto-stop-after-90s idea. Suspend-and-resume maintains continuity.
+
+### D. Decision 2/3 — transcription default and switching (operator decision, 24 Jun)
+- Default is English on the free Whisper path. The multilingual nova-3 path (with diarization) is available.
+- The mode can be changed mid-session (technically easy on this architecture). The change applies to subsequent speech only, and is NOT greyed out during a session.
+- Caveat: speaker labels (diarization) exist only on the multilingual engine, so switching mid-session changes whether the other side is labelled from that point onward.
+
+### E. NEW SCOPE — MODES (session profiles layered on the base)
+Architecture principle: the base system (capture, transcribe, coach) is the substrate. A mode is a session profile, made of session-scoped context + a mode-specific questioning/coaching strategy + a verdict/state layer + mode-specific UI. The v1 remote-control and lifecycle architecture hosts modes without rework. A mode is selected per session.
+
+Mode 0 — General meeting copilot (the current base): live coaching, talk-time balance, open follow-ups, assist.
+
+Mode 1 — Interview mode (recruitment):
+- Setup: the recruiter adds the candidate resume plus a few lines of expectations. Nothing else is required.
+- Session-scoped: all candidate data lives only in that session.
+- The system DRIVES the interview through the recruiter. It generates resume-based questions for the recruiter to ask, captures the candidate answers live, verifies them against the LLM knowledge or, where needed, live web search, and adaptively cross-questions deeper based on the real answers, feeding the recruiter the next question.
+- The recruiter may have zero domain knowledge. The system remote-controls the line of questioning via the recruiter; the recruiter is only the voice.
+- Outcome: by the end of the interview, a clear green or red verdict on whether the candidate knowledge and experience match the resume, or whether they are misrepresenting (fake-candidate detection).
+- Reuses: live capture (OTHERS is the candidate, ME is the recruiter), transcription, the coaching stream repurposed as a questioning strategy, and the existing web search.
+
+Mode 2 — Customer service mode:
+- Session/profile context is unified data about the company products and services.
+- The system assists the agent in real time from that product and service knowledge.
+- Phase 2/3: connect to the company CRM to capture and use real customer information during the call.
+
+### F. Phasing update
+- Phase 1 (current, in build): remote-control redesign + session suspend/resume lifecycle + the v1 hardening list in B + the existing base coaching/assist/follow-up. Definition of done: a verified end-to-end test where the browser cockpit remote-drives the helper, suspend and resume work, and one-active-helper is enforced.
+- Phase 1.5: the mode framework (session-profile abstraction) and Interview mode (first non-default mode, highest value).
+- Phase 2: Customer service mode (unified product/service knowledge); meeting-bot via Recall.ai as previously planned; multilingual already available.
+- Phase 3: CRM integration for customer service mode; multi-user invites, still gated behind the auth hardening backlog in section 7.
+
+### G. Cross-review record
+correlationId cr-smc-remote-control-arch-20260624. Verdict APPROVE-WITH-CHANGES. Codex confirmed the direction and proposed no change of direction. Anti-drift gate did not fire. Six of my own recommendations were adopted (five agreed, one upgraded to lease-based); one was reversed on the merits (keep the free Whisper English path rather than standardising on nova-3); the rest were Codex additions folded into the v1 hardening list.
