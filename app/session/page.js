@@ -9,6 +9,8 @@ const MAX_RECONNECTS = 5;
 const COACH_INTERVAL_MS = 25000;
 const COACH_MIN_SEGMENTS = 3;
 const FLAG_POLL_INTERVAL_MS = 30000;
+const TOKEN_REFRESH_MS = 12 * 60 * 1000;
+const HEARTBEAT_MS = 25000;
 const ASSIST_DEDUP_KEY = (card) => `${card.type}:${card.label}:${card.value}`;
 
 const ALLOWED_EXTENSIONS = ['.md', '.txt'];
@@ -48,11 +50,13 @@ export default function SessionPage() {
   const [flaggedItems, setFlaggedItems] = useState([]);
   const [error, setError] = useState('');
   const [wsConnected, setWsConnected] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [deepgramAvailable, setDeepgramAvailable] = useState(null);
   const [saveStatus, setSaveStatus] = useState(''); // '', 'saving', 'saved', 'error'
   const [uploadError, setUploadError] = useState('');
   const [isDragOver, setIsDragOver] = useState(false);
+  const [helperConnected, setHelperConnected] = useState(null);
+  const [paused, setPaused] = useState(false);
+  const [showComplianceModal, setShowComplianceModal] = useState(false);
 
   const wsRef = useRef(null);
   const recorderRef = useRef(null);
@@ -72,6 +76,9 @@ export default function SessionPage() {
   const flaggedItemsRef = useRef([]);
   const segmentTimer = useRef(null);
   const suppressMicRef = useRef(false); // true when a desktop helper is the authoritative ME source
+  const tokenRef = useRef(null);
+  const heartbeatTimer = useRef(null);
+  const complianceAckRef = useRef(false);
 
   useEffect(() => { meLinesRef.current = meLines; }, [meLines]);
   useEffect(() => { othersLinesRef.current = othersLines; }, [othersLines]);
@@ -476,7 +483,30 @@ export default function SessionPage() {
     }).catch(() => {});
   }, []);
 
-  const startSession = useCallback(async () => {
+  const getEngineToken = useCallback(async () => {
+    const res = await fetch('/api/session/start', { method: 'POST' });
+    if (!res.ok) throw new Error('Could not get an engine session token — please sign in again.');
+    const data = await res.json();
+    if (!data.token) throw new Error('No session token returned.');
+    tokenRef.current = data.token;
+    return data.token;
+  }, []);
+
+  const startHeartbeat = useCallback(() => {
+    if (heartbeatTimer.current) clearInterval(heartbeatTimer.current);
+    heartbeatTimer.current = setInterval(() => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        try { wsRef.current.send(JSON.stringify({ type: 'heartbeat', ts: Date.now() })); } catch (_) {}
+      }
+    }, HEARTBEAT_MS);
+  }, []);
+
+  const stopHeartbeat = useCallback(() => {
+    if (heartbeatTimer.current) { clearInterval(heartbeatTimer.current); heartbeatTimer.current = null; }
+  }, []);
+
+  const startSession = useCallback(async (opts = {}) => {
+    const resume = opts?.resume === true;
     if (!sessionCode) return;
 
     if (mode === 'hindi-urdu' && deepgramAvailable === false) {
@@ -489,14 +519,17 @@ export default function SessionPage() {
 
     intentionalStop.current = false;
     reconnectCount.current = 0;
+    setPaused(false);
     updateStatus('connecting');
     setError('');
-    setMeLines([]);
-    setOthersLines([]);
-    setCoaching(null);
-    setAssistCards([]);
-    setFlaggedItems([]);
-    seenAssistKeys.current = new Set();
+    if (!resume) {
+      setMeLines([]);
+      setOthersLines([]);
+      setCoaching(null);
+      setAssistCards([]);
+      setFlaggedItems([]);
+      seenAssistKeys.current = new Set();
+    }
 
     // Use existing meeting ID or create one
     try {
@@ -544,10 +577,10 @@ export default function SessionPage() {
           try { wsRef.current.close(); } catch (_) {}
         }
 
-        const qs = new URLSearchParams({ mode: sessionMode, role: 'browser' });
+        const qs = new URLSearchParams({ mode: sessionMode, role: 'browser', token: tokenRef.current || '' });
         const langHint = MODE_LANG[sessionMode];
         if (langHint) qs.set('lang', langHint);
-        const wsUrl = ENGINE_URL.replace(/^http/, 'ws') + `/session/${code}/ws?${qs}`;
+        const wsUrl = ENGINE_URL.replace(/^http/, 'ws') + `/app/ws?${qs}`;
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
         let settled = false;
@@ -561,6 +594,8 @@ export default function SessionPage() {
           reconnectCount.current = 0;
           setWsConnected(true);
           setError('');
+          try { ws.send(JSON.stringify({ type: 'control', action: resume ? 'resume' : 'start', mode: sessionMode, lang: MODE_LANG[sessionMode] || null })); } catch (_) {}
+          startHeartbeat();
 
           ws.onmessage = (evt) => {
             try {
@@ -628,6 +663,20 @@ export default function SessionPage() {
                 );
               } else if (msg.type === 'helper_status') {
                 suppressMicRef.current = !!msg.connected;
+                setHelperConnected(!!msg.connected);
+              } else if (msg.type === 'session_state') {
+                if (typeof msg.helperConnected === 'boolean') {
+                  suppressMicRef.current = msg.helperConnected;
+                  setHelperConnected(msg.helperConnected);
+                }
+                if (msg.status === 'paused') {
+                  setPaused(true);
+                  liveStatus.current = 'paused';
+                  setStatus('paused');
+                  stopHeartbeat();
+                } else if (msg.status === 'active') {
+                  setPaused(false);
+                }
               }
             } catch (_) {}
           };
@@ -645,7 +694,7 @@ export default function SessionPage() {
             const delay = Math.min(1000 * Math.pow(2, n), 30000);
             setError(`Connection lost. Reconnecting in ${Math.round(delay / 1000)}s… (${reconnectCount.current}/${MAX_RECONNECTS})`);
             reconnectTimer.current = setTimeout(() => {
-              if (!intentionalStop.current) openWs(code, sessionMode).catch(() => {});
+              if (!intentionalStop.current) getEngineToken().then(() => openWs(code, sessionMode)).catch(() => {});
             }, delay);
           };
 
@@ -660,6 +709,7 @@ export default function SessionPage() {
     }
 
     try {
+      await getEngineToken();
       await openWs(sessionCode, mode);
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true },
@@ -703,15 +753,17 @@ export default function SessionPage() {
       streamRef.current?.getTracks().forEach(t => t.stop());
       wsRef.current = null; recorderRef.current = null; streamRef.current = null;
     }
-  }, [sessionCode, mode, objective, contextNotes, title, deepgramAvailable, updateStatus]);
+  }, [sessionCode, mode, objective, contextNotes, title, deepgramAvailable, updateStatus, getEngineToken, startHeartbeat, stopHeartbeat]);
 
   const stopSession = useCallback(() => {
     intentionalStop.current = true;
     if (segmentTimer.current) { clearTimeout(segmentTimer.current); segmentTimer.current = null; }
     if (reconnectTimer.current) { clearTimeout(reconnectTimer.current); reconnectTimer.current = null; }
+    stopHeartbeat();
     recorderRef.current?.stop();
     streamRef.current?.getTracks().forEach(t => t.stop());
     if (wsRef.current && wsRef.current.readyState < WebSocket.CLOSING) {
+      try { wsRef.current.send(JSON.stringify({ type: 'control', action: 'stop' })); } catch (_) {}
       try { wsRef.current.close(); } catch (_) {}
     }
     wsRef.current = null; recorderRef.current = null; streamRef.current = null;
@@ -724,14 +776,22 @@ export default function SessionPage() {
         body: JSON.stringify({ ended_at: new Date().toISOString() }),
       }).catch(() => {});
     }
-  }, [updateStatus]);
+  }, [updateStatus, stopHeartbeat]);
 
-  const copyLink = useCallback(() => {
-    if (!sessionCode) return;
-    navigator.clipboard.writeText(sessionCode).then(() => {
-      setCopied(true); setTimeout(() => setCopied(false), 2000);
-    }).catch(() => {});
-  }, [sessionCode]);
+  const handleStartClick = useCallback(() => {
+    if (!complianceAckRef.current) { setShowComplianceModal(true); return; }
+    startSession();
+  }, [startSession]);
+
+  const acceptComplianceAndStart = useCallback(() => {
+    complianceAckRef.current = true;
+    setShowComplianceModal(false);
+    startSession();
+  }, [startSession]);
+
+  const resumeSession = useCallback(() => {
+    startSession({ resume: true });
+  }, [startSession]);
 
   const copyAssistCard = useCallback((card) => {
     const key = ASSIST_DEDUP_KEY(card);
@@ -744,8 +804,10 @@ export default function SessionPage() {
 
   const isLive = status === 'live';
   const isConnecting = status === 'connecting';
+  const isPaused = status === 'paused' || paused;
+  const showDeafWarning = isLive && helperConnected === false;
   const deepgramBlocked = mode === 'hindi-urdu' && deepgramAvailable === false;
-  const canStart = !isLive && !isConnecting && !deepgramBlocked;
+  const canStart = !isLive && !isConnecting && !isPaused && !deepgramBlocked;
   const correctionCount = coaching?.corrections?.length ?? 0;
   const activeFlaggedItems = flaggedItems.filter(f => !f.addressed);
   const addressedCount = flaggedItems.filter(f => f.addressed).length;
@@ -772,15 +834,10 @@ export default function SessionPage() {
           </div>
 
           <div style={styles.codeBox}>
-            <span style={styles.codeLabel}>Session&nbsp;code</span>
-            <code style={styles.code}>{sessionCode || '…'}</code>
-            <button
-              onClick={copyLink}
-              style={{ ...styles.smallBtn, background: copied ? '#166534' : 'var(--bg-raised)' }}
-              title="Copy the session code to paste into the desktop helper"
-            >
-              {copied ? '✓ Copied' : 'Copy code'}
-            </button>
+            <span style={{ ...styles.dot, background: helperConnected ? '#22c55e' : '#6b7280' }} />
+            <span style={styles.codeLabel}>
+              {helperConnected ? 'Desktop helper connected' : 'Desktop helper not connected'}
+            </span>
           </div>
 
           <ThemeToggle />
@@ -800,23 +857,27 @@ export default function SessionPage() {
               </select>
             </div>
 
-            <span style={{ ...styles.dot, background: isLive ? '#22c55e' : isConnecting ? '#facc15' : '#6b7280' }} />
+            <span style={{ ...styles.dot, background: isLive ? '#22c55e' : isConnecting ? '#facc15' : isPaused ? '#f59e0b' : '#6b7280' }} />
             <span style={styles.statusText}>
               {isLive ? `Live — ${MODE_LABEL[mode] || mode}`
                 : isConnecting ? 'Connecting…'
+                : isPaused ? 'Paused'
                 : status === 'stopped' ? 'Stopped'
                 : 'Ready'}
             </span>
 
             {canStart && (
-              <button onClick={startSession} style={{ ...styles.btn, background: '#2AB49F', minWidth: 120 }} disabled={!sessionCode}>
+              <button onClick={handleStartClick} style={{ ...styles.btn, background: '#2AB49F', minWidth: 120 }} disabled={!sessionCode}>
                 Start Session
               </button>
             )}
-            {deepgramBlocked && !isLive && !isConnecting && (
+            {deepgramBlocked && !isLive && !isConnecting && !isPaused && (
               <button style={{ ...styles.btn, background: '#4b5563', minWidth: 120, cursor: 'not-allowed' }} disabled>
                 Start Session
               </button>
+            )}
+            {isPaused && (
+              <button onClick={resumeSession} style={{ ...styles.btn, background: '#f59e0b', minWidth: 120 }}>Resume</button>
             )}
             {(isLive || isConnecting) && (
               <button onClick={stopSession} style={{ ...styles.btn, background: '#ef4444', minWidth: 80 }}>Stop</button>
@@ -969,6 +1030,31 @@ export default function SessionPage() {
           </div>
         )}
         {error && <div style={styles.errorBox}>{error}</div>}
+        {showDeafWarning && (
+          <div style={styles.warnBox}>
+            <strong>No desktop helper connected.</strong> The other side&apos;s audio is not being captured. Open the SMC Helper on this computer and it will join automatically.
+          </div>
+        )}
+        {isPaused && (
+          <div style={{ ...styles.warnBox, borderColor: '#92400e', background: '#1c1007', color: '#fcd34d' }}>
+            This session is paused. Press <strong>Resume</strong> to continue capturing. It also auto-pauses if the cockpit is closed, and stops at a 3-hour limit.
+          </div>
+        )}
+        {showComplianceModal && (
+          <div style={styles.modalOverlay} onClick={() => setShowComplianceModal(false)}>
+            <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+              <div style={styles.modalTitle}>Before you start</div>
+              <div style={styles.modalBody}>
+                This meeting may be transcribed and analysed by AI to provide live assistance, quality and assessment.
+                Make sure you have any consent required, and that recording or analysing this conversation complies with the laws that apply to you and the other participants. You are responsible for lawful use.
+              </div>
+              <div style={styles.modalActions}>
+                <button onClick={() => setShowComplianceModal(false)} style={{ ...styles.btn, background: 'var(--bg-raised)', color: 'var(--tx)' }}>Cancel</button>
+                <button onClick={acceptComplianceAndStart} style={{ ...styles.btn, background: '#2AB49F' }}>I understand — start</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Transcript panels — shown when live or stopped */}
         {(isLive || status === 'stopped' || status === 'error') && (
@@ -1016,7 +1102,7 @@ export default function SessionPage() {
                 {othersLines.length === 0 && (
                   <span style={styles.muted}>
                     Others&apos; speech appears here via the desktop helper.<br />
-                    Share code <strong style={{ color: '#2AB49F' }}>{sessionCode || '…'}</strong> or use Copy code above.
+                    Open the SMC Helper on this computer — it connects automatically.
                   </span>
                 )}
                 {othersLines.map((l, i) => (
@@ -1430,4 +1516,9 @@ const styles = {
   refTitle: { fontSize: 12, color: 'var(--others)', textDecoration: 'none', display: 'block', marginBottom: 2, wordBreak: 'break-word' },
   refSnippet: { fontSize: 11, color: 'var(--tx-3)', lineHeight: 1.4 },
   foot: { fontSize: 11, color: 'var(--tx-3)', textAlign: 'center' },
+  modalOverlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 },
+  modalCard: { background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, maxWidth: 460, display: 'flex', flexDirection: 'column', gap: 14 },
+  modalTitle: { fontSize: 15, fontWeight: 700, color: 'var(--tx)' },
+  modalBody: { fontSize: 13, color: 'var(--tx-2)', lineHeight: 1.6 },
+  modalActions: { display: 'flex', justifyContent: 'flex-end', gap: 10 },
 };
