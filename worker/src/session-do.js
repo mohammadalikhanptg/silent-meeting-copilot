@@ -194,21 +194,11 @@ export async function transcribeAndClean(audioBytes, env, lang = null, mode = 'a
 
   if (!raw) return { raw: '', cleaned: '', provider };
 
-  // LLM cleanup pass: fix punctuation/capitalisation, preserve original language.
-  const llmResult = await env.AI.run('@cf/meta/llama-3.2-3b-instruct', {
-    messages: [
-      {
-        role: 'system',
-        content:
-          'You are a meeting transcript editor. Fix punctuation, capitalisation, and obvious transcription errors. PRESERVE the original language (English, Hindi, Urdu, or mixed code-switching). PRESERVE any [Speaker N] labels exactly as written. Do NOT translate, summarise, or expand. Return ONLY the corrected text.',
-      },
-      { role: 'user', content: raw },
-    ],
-    max_tokens: 1024,
-  });
-
-  const cleaned = (llmResult.response || raw).trim();
-  return { raw, cleaned, provider };
+  // Both providers already punctuate and smart-format. The previous LLM cleanup
+  // pass (llama-3.2-3b) sometimes injected meta-commentary on short English
+  // fragments (e.g. "there is no reference text..."), so we now return the
+  // transcript verbatim. cleaned === raw means the UI shows no "[raw differs]".
+  return { raw, cleaned: raw, provider };
 }
 
 // ---------------------------------------------------------------------------

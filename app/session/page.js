@@ -991,7 +991,7 @@ export default function SessionPage() {
                         onClick={() => !l.flagged && flagItem(l.cleaned, 'me', l.ts, null)}
                         style={{
                           ...styles.flagBtn,
-                          color: l.flagged ? '#f59e0b' : '#9aa0a6',
+                          color: l.flagged ? '#f59e0b' : '#cfd4db',
                           cursor: l.flagged ? 'default' : 'pointer',
                         }}
                         title={l.flagged ? 'Flagged for follow-up' : 'Flag this for follow-up'}
@@ -1037,7 +1037,7 @@ export default function SessionPage() {
                         onClick={() => !l.flagged && flagItem(l.corrected || l.cleaned, 'others', l.ts, l.segmentId)}
                         style={{
                           ...styles.flagBtn,
-                          color: l.flagged ? '#f59e0b' : '#9aa0a6',
+                          color: l.flagged ? '#f59e0b' : '#cfd4db',
                           cursor: l.flagged ? 'default' : 'pointer',
                         }}
                         title={l.flagged ? 'Flagged for follow-up' : 'Flag this for follow-up'}
@@ -1360,7 +1360,7 @@ const styles = {
   line: { display: 'flex', flexWrap: 'nowrap', gap: 6, alignItems: 'baseline' },
   ts: { fontSize: 10, color: 'var(--tx-3)', flexShrink: 0, fontFeatureSettings: '"tnum"' },
   hint: { fontSize: 10, color: 'var(--tx-3)', cursor: 'help' },
-  flagBtn: { background: 'none', border: 'none', fontSize: 14, padding: '0 2px', flexShrink: 0, lineHeight: 1 },
+  flagBtn: { background: 'none', border: 'none', fontSize: 17, padding: '0 4px', flexShrink: 0, lineHeight: 1 },
   clarifiedBadge: {
     fontSize: 9, fontWeight: 700, color: '#34d399', background: '#052e16',
     border: '1px solid #166534', borderRadius: 4, padding: '1px 5px', marginRight: 5,
