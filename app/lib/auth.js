@@ -241,9 +241,18 @@ export function verifyHelperKeyHmac(key) {
 // ── Browser session token (engine WebSocket auth) ─────────────────────────────
 // Short-lived, HMAC-signed token issued to a logged-in user so the browser can
 // authenticate directly to the Cloudflare engine WS (which routes by email).
-export function generateSessionToken(email, ttlSec = 12 * 60 * 60) {
+// Default TTL is short (15 min); the browser refreshes via POST /api/session/start.
+export function generateSessionToken(email, ttlSec = 15 * 60) {
+  const now = Math.floor(Date.now() / 1000);
   const payload = Buffer.from(
-    JSON.stringify({ u: email, exp: Math.floor(Date.now() / 1000) + ttlSec })
+    JSON.stringify({
+      u: email,
+      typ: 'engine-ws',
+      aud: 'smc-engine',
+      iat: now,
+      exp: now + ttlSec,
+      jti: crypto.randomBytes(9).toString('base64url'),
+    })
   ).toString('base64url');
   const sig = crypto.createHmac('sha256', helperSigningSecret()).update(payload).digest('base64url');
   return `smcs1_${payload}.${sig}`;
@@ -265,8 +274,39 @@ export function verifySessionToken(token) {
     const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
     if (!parsed.u || !parsed.exp) return null;
     if (parsed.exp < Math.floor(Date.now() / 1000)) return null;
-    return { email: parsed.u, exp: parsed.exp };
+    if (parsed.typ && parsed.typ !== 'engine-ws') return null;
+    if (parsed.aud && parsed.aud !== 'smc-engine') return null;
+    return { email: parsed.u, exp: parsed.exp, jti: parsed.jti || null, aud: parsed.aud || null };
   } catch {
     return null;
   }
+}
+
+// ── Internal service auth (worker <-> app) ────────────────────────────────────
+// The Cloudflare engine authenticates to the app /api/internal/* routes with a
+// dedicated shared secret (INTERNAL_SHARED_SECRET), kept SEPARATE from the
+// key/token signing secret so rotating the transport secret never invalidates
+// issued pairing keys or browser tokens. During migration the previous
+// HELPER_SIGNING_SECRET is still accepted as a fallback; drop it once the engine
+// is confirmed sending INTERNAL_SHARED_SECRET.
+function internalBearerSecrets() {
+  const out = [];
+  if (process.env.INTERNAL_SHARED_SECRET) out.push(process.env.INTERNAL_SHARED_SECRET);
+  if (process.env.HELPER_SIGNING_SECRET) out.push(process.env.HELPER_SIGNING_SECRET);
+  return out;
+}
+
+// Returns 'ok' | 'misconfig' | 'unauthorized'.
+export function checkInternalBearer(authHeader) {
+  const secrets = internalBearerSecrets();
+  if (secrets.length === 0) return 'misconfig';
+  const provided = (authHeader || '').startsWith('Bearer ') ? authHeader.slice(7) : '';
+  const a = Buffer.from(provided);
+  for (const s of secrets) {
+    const b = Buffer.from(s);
+    if (a.length === b.length) {
+      try { if (crypto.timingSafeEqual(a, b)) return 'ok'; } catch (_) {}
+    }
+  }
+  return 'unauthorized';
 }

@@ -1,31 +1,17 @@
 import { NextResponse } from 'next/server';
-import { verifyHelperKeyHmac } from '../../../lib/auth';
+import { verifyHelperKeyHmac, checkInternalBearer } from '../../../lib/auth';
 import { getSql } from '../../../lib/db';
 
 export const dynamic = 'force-dynamic';
 
 // GET /api/internal/validate-helper-key?key=smc1_xxx.yyy&session_code=abc-1234
 // Called by the Cloudflare worker to validate a helper pairing key.
-// Auth: Authorization: Bearer HELPER_SIGNING_SECRET
+// Auth: Authorization: Bearer INTERNAL_SHARED_SECRET (HELPER_SIGNING_SECRET accepted during migration)
 export async function GET(request) {
   const authHeader = request.headers.get('Authorization') || '';
-  const secret = process.env.HELPER_SIGNING_SECRET;
-  if (!secret) return NextResponse.json({ valid: false, reason: 'server misconfigured' }, { status: 500 });
-
-  // Constant-time comparison for Bearer token
-  const provided = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-  let match = false;
-  try {
-    const { timingSafeEqual } = await import('node:crypto');
-    const a = Buffer.from(provided);
-    const b = Buffer.from(secret);
-    match = a.length === b.length && timingSafeEqual(a, b);
-  } catch {
-    match = provided === secret;
-  }
-  if (!match) {
-    return NextResponse.json({ valid: false, reason: 'unauthorized' }, { status: 401 });
-  }
+  const auth = checkInternalBearer(authHeader);
+  if (auth === 'misconfig') return NextResponse.json({ valid: false, reason: 'server misconfigured' }, { status: 500 });
+  if (auth !== 'ok') return NextResponse.json({ valid: false, reason: 'unauthorized' }, { status: 401 });
 
   const url = new URL(request.url);
   const key = url.searchParams.get('key') || '';
@@ -40,7 +26,6 @@ export async function GET(request) {
   }
 
   const { email, version } = decoded;
-
   const sql = getSql();
 
   // Check version matches current DB version (rotation invalidates old keys)
