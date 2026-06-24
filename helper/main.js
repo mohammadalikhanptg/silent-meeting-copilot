@@ -23,12 +23,7 @@ function createTrayIcon() {
 
 function updateTrayMenu() {
   const menu = Menu.buildFromTemplate([
-    {
-      label: isCapturing ? 'Stop Capturing' : 'Start Capturing',
-      click: () => {
-        if (win) win.webContents.send('toggle-capture', !isCapturing);
-      },
-    },
+    { label: isCapturing ? 'Capturing (controlled by cockpit)' : 'Standby', enabled: false },
     { type: 'separator' },
     {
       label: 'Show Window',

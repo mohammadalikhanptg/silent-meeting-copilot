@@ -15,9 +15,9 @@
     .dot { width:9px;height:9px;border-radius:50%;background:#6b7280;flex-shrink:0; }
     .dot.green { background:var(--green); }
     .dot.amber { background:#facc15; }
+    .dot.blue { background:var(--blue); }
     button { border:none;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;color:#fff;cursor:pointer;background:var(--panel);border:1px solid var(--border); }
     button.primary { background:var(--teal);border-color:var(--teal); }
-    button.danger { background:var(--red);border-color:var(--red); }
     button.save { background:#2a1a5a;border-color:#4b2a8a;color:var(--purple); }
     .meters { display:grid;grid-template-columns:1fr 1fr;gap:10px; }
     .meter-block label { font-size:10px;color:var(--muted); }
@@ -27,13 +27,12 @@
     .bar.ot span { background:var(--blue); }
     .log { flex:1;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:8px;overflow-y:auto;font-size:11px;line-height:1.6;color:var(--muted);font-family:monospace;white-space:pre-wrap;min-height:60px; }
     select,input[type=text],input[type=password] { background:var(--panel);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 8px;font-size:12px; }
-    input[type=text]::placeholder,input[type=password]::placeholder { color:var(--muted); }
-    input[type=text]:disabled,input[type=password]:disabled { opacity:0.5; }
+    input[type=password]::placeholder { color:var(--muted); }
     .url { font-size:10px;color:var(--muted);word-break:break-all; }
-    .code-hint { font-size:10px;color:var(--muted);margin-top:2px; }
     .key-section { background:#0d0820;border:1px solid #2a1a4a;border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:6px; }
     .key-label { font-size:10px;font-weight:600;color:var(--purple);letter-spacing:0.06em;text-transform:uppercase; }
     .key-saved { font-size:10px;color:var(--green); }
+    .hint { font-size:10px;color:#6b7280; }
   </style>
 </head>
 <body>
@@ -46,30 +45,14 @@
     <div class="key-section">
       <div class="key-label">Pairing key <span id="keySavedBadge" class="key-saved" style="display:none">✓ saved</span></div>
       <div class="row">
-        <input
-          id="pairingKeyInput"
-          type="password"
-          placeholder="Paste your pairing key from the profile page…"
-          style="flex:1;font-family:monospace;letter-spacing:0.04em;"
-        />
+        <input id="pairingKeyInput" type="password" placeholder="Paste your pairing key from the profile page…" style="flex:1;font-family:monospace;letter-spacing:0.04em;" />
         <button class="save" id="saveKeyBtn">Save</button>
       </div>
-      <div style="font-size:10px;color:#6b7280">
+      <div class="hint">
         Get your key from <strong style="color:#a78bfa">Silent Meeting Copilot → Profile → Desktop helper</strong>.
-        The key is stored securely on this device and sent automatically when you start a session.
+        The helper connects automatically and captures only when your browser cockpit starts a session.
       </div>
     </div>
-
-    <div class="row">
-      <label style="font-size:11px;color:var(--muted);white-space:nowrap">Session code:</label>
-      <input
-        id="sessionInput"
-        type="text"
-        placeholder="e.g. drk-8421  (leave empty to generate)"
-        style="flex:1;font-family:monospace;letter-spacing:0.05em;"
-      />
-    </div>
-    <div class="code-hint">Enter the session code shown in the browser — both devices will share the same session.</div>
 
     <div class="row">
       <label style="font-size:11px;color:var(--muted)">Microphone:</label>
@@ -79,10 +62,10 @@
 
     <div class="row">
       <div class="dot" id="statusDot"></div>
-      <span id="statusText" style="color:var(--muted)">Idle</span>
-      <button class="primary" id="startBtn">Start</button>
-      <button class="danger" id="stopBtn" disabled>Stop</button>
+      <span id="statusText" style="color:var(--muted)">Starting…</span>
+      <button class="primary" id="armBtn" style="display:none">Enable microphone &amp; system audio</button>
     </div>
+    <div class="hint">This device records only when your browser session is live. The first time, click Enable to grant microphone and system-audio access.</div>
 
     <div class="meters">
       <div class="meter-block">

@@ -1,10 +1,10 @@
-// SMC Helper renderer — dual-channel audio capture + WebSocket streaming
+// SMC Helper renderer — daemon model.
+// Connects to the engine on launch (standby), and captures ONLY when the engine
+// (driven by the browser cockpit) sends a capture command. No session code, no
+// manual start/stop. The helper never self-resumes capture; the engine decides.
 
 const logEl = document.getElementById('log');
 const micSel = document.getElementById('micSel');
-const sessionInput = document.getElementById('sessionInput');
-const startBtn = document.getElementById('startBtn');
-const stopBtn = document.getElementById('stopBtn');
 const statusDot = document.getElementById('statusDot');
 const statusText = document.getElementById('statusText');
 const barMe = document.getElementById('barMe');
@@ -13,31 +13,41 @@ const engineUrlEl = document.getElementById('engineUrl');
 const pairingKeyInput = document.getElementById('pairingKeyInput');
 const saveKeyBtn = document.getElementById('saveKeyBtn');
 const keySavedBadge = document.getElementById('keySavedBadge');
+const armBtn = document.getElementById('armBtn');
 
 const CHUNK_MS = 2500;
+const HEARTBEAT_MS = 25000;
+const BACKOFF_MS = [1000, 2000, 5000, 10000, 30000, 60000];
+// Client-side silence gating (per channel) to cut transcription cost and noise.
+const RMS_ON = 0.018;        // enter "speaking" above this
+const RMS_OFF = 0.010;       // leave "speaking" below this (hysteresis)
+const MIN_SPEECH_MS = 150;   // sustained speech before a segment counts as voiced
+const POSTROLL_MS = 1500;    // keep sending briefly after speech so tails are not clipped
+
+let engineUrl = '';
+let pairingKey = '';
+let deviceId = '';
 
 let ws = null;
-let micRecorder = null;
-let othersRecorder = null;
-let micStream = null;
-let dispStream = null;
-let analyserCtxMe = null;
-let analyserCtxOt = null;
-let rafId = null;
-let engineUrl = '';
-let sessionId = '';
-let pairingKey = ''; // loaded from safeStorage on init, sent as ?key= on WS connect
-let micSegTimer = null;
-let otSegTimer = null;
-let capturing = false;
+let reconnectIdx = 0;
+let reconnectTimer = null;
+let heartbeatTimer = null;
+let intentionalClose = false;
 
-// Short human-readable code matching the browser format: 3 letters + 4 digits
-function generateShortCode() {
-  const chars = 'abcdefghjkmnpqrstuvwxyz';
-  const letters = Array.from({ length: 3 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-  const digits = String(Math.floor(Math.random() * 9000) + 1000);
-  return `${letters}-${digits}`;
-}
+let armed = false;        // streams acquired on this device (needs a one-time gesture)
+let capturing = false;    // actively recording + streaming
+let pendingCapture = false; // engine asked to capture but we are not armed yet
+let demoted = false;      // another helper is the active one
+
+let micStream = null, dispStream = null, othersStream = null;
+let micRecorder = null, othersRecorder = null;
+let micSegTimer = null, otSegTimer = null;
+let meterMe = null, meterOt = null, rafId = null;
+
+const speech = {
+  me: { spk: false, spkSince: 0, seg: false, last: 0 },
+  others: { spk: false, spkSince: 0, seg: false, last: 0 },
+};
 
 function log(msg) {
   const t = new Date().toLocaleTimeString();
@@ -45,20 +55,223 @@ function log(msg) {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
-function setStatus(state) {
-  const states = {
-    idle: { dot: '', text: 'Idle' },
-    connecting: { dot: 'amber', text: 'Connecting…' },
-    live: { dot: 'green', text: 'Live — streaming' },
-    error: { dot: '', text: 'Error — check log' },
-  };
-  const s = states[state] || states.idle;
-  statusDot.className = 'dot ' + s.dot;
-  statusText.textContent = s.text;
-  window.smc?.setCaptureState(state === 'live');
+function getDeviceId() {
+  try {
+    let id = localStorage.getItem('smc_device_id');
+    if (!id) {
+      id = (crypto.randomUUID && crypto.randomUUID()) || (Date.now() + '-' + Math.random().toString(36).slice(2));
+      localStorage.setItem('smc_device_id', id);
+    }
+    return id;
+  } catch (_) {
+    return 'dev-' + Math.random().toString(36).slice(2);
+  }
 }
 
-// Encode audio buffer with speaker byte prefix (0=me, 1=others)
+function setState(state) {
+  const map = {
+    disconnected: { dot: '', text: 'Disconnected — reconnecting…' },
+    connecting:   { dot: 'amber', text: 'Connecting…' },
+    standby:      { dot: 'blue', text: 'Standby — ready, waiting for the cockpit' },
+    needsArm:     { dot: 'amber', text: 'Action needed — click Enable on this device' },
+    capturing:    { dot: 'green', text: 'Capturing — streaming to the cockpit' },
+    inactive:     { dot: '', text: 'Standby — another device is active' },
+  };
+  const s = map[state] || map.disconnected;
+  statusDot.className = 'dot ' + s.dot;
+  statusText.textContent = s.text;
+  // Arm button is only relevant until this device is armed.
+  armBtn.style.display = armed ? 'none' : 'inline-block';
+  window.smc?.setCaptureState(state === 'capturing');
+}
+
+function refreshState() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) { setState('disconnected'); return; }
+  if (capturing) { setState('capturing'); return; }
+  if (pendingCapture && !armed) { setState('needsArm'); return; }
+  if (demoted) { setState('inactive'); return; }
+  setState('standby');
+}
+
+// ── WebSocket lifecycle ───────────────────────────────────────────────────────
+function connect() {
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  if (!pairingKey) {
+    log('No pairing key set. Paste your key above and click Save, then it will connect automatically.');
+    setState('disconnected');
+    return;
+  }
+  setState('connecting');
+  const qs = new URLSearchParams({ role: 'helper', key: pairingKey, device: deviceId });
+  const wsUrl = engineUrl.replace(/^http/, 'ws') + `/helper/ws?${qs}`;
+  log('Connecting to engine…');
+  try {
+    ws = new WebSocket(wsUrl);
+  } catch (e) {
+    log('Connect failed: ' + e.message);
+    scheduleReconnect();
+    return;
+  }
+  ws.binaryType = 'arraybuffer';
+
+  ws.onopen = () => {
+    reconnectIdx = 0;
+    demoted = false;
+    log('Connected. Standing by.');
+    // Announce this device and its capabilities (engine ignores unknown fields).
+    try { ws.send(JSON.stringify({ type: 'hello', device: deviceId, platform: navigator.platform, app: 'smc-helper' })); } catch (_) {}
+    startHeartbeat();
+    refreshState();
+  };
+  ws.onmessage = (evt) => {
+    if (typeof evt.data !== 'string') return; // helper does not receive binary
+    let msg; try { msg = JSON.parse(evt.data); } catch (_) { return; }
+    handleEngineMessage(msg);
+  };
+  ws.onerror = () => { log('Connection error.'); };
+  ws.onclose = (evt) => {
+    stopHeartbeat();
+    if (evt.code === 4401) {
+      log('Authentication failed — check your pairing key. Will retry.');
+    }
+    if (capturing) endCapture(true); // stop recording; streams stay armed for fast resume
+    ws = null;
+    if (!intentionalClose) { setState('disconnected'); scheduleReconnect(); }
+  };
+}
+
+function scheduleReconnect() {
+  if (intentionalClose) return;
+  const base = BACKOFF_MS[Math.min(reconnectIdx, BACKOFF_MS.length - 1)];
+  const jitter = Math.floor(Math.random() * Math.min(base, 1000));
+  const delay = base + jitter;
+  reconnectIdx++;
+  log(`Reconnecting in ${Math.round(delay / 1000)}s…`);
+  reconnectTimer = setTimeout(connect, delay);
+}
+
+function startHeartbeat() {
+  stopHeartbeat();
+  heartbeatTimer = setInterval(() => {
+    if (ws?.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({ type: 'heartbeat', ts: Date.now() })); } catch (_) {}
+    }
+  }, HEARTBEAT_MS);
+}
+function stopHeartbeat() { if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; } }
+
+function handleEngineMessage(msg) {
+  switch (msg.type) {
+    case 'capture':
+      if (msg.action === 'start') {
+        demoted = false;
+        beginCapture();
+      } else if (msg.action === 'stop') {
+        endCapture(true);
+        refreshState();
+      } else if (msg.action === 'config') {
+        log(`Session language/mode updated by cockpit (${msg.mode || 'auto'}).`);
+      }
+      break;
+    case 'helper_demoted':
+      demoted = true;
+      endCapture(true);
+      log('Another device became the active helper. This device is now on standby.');
+      refreshState();
+      break;
+    case 'session_state':
+      // Informational; capture is driven by explicit capture commands.
+      if (msg.status === 'paused' || msg.status === 'ended') { if (capturing) { endCapture(true); refreshState(); } }
+      break;
+    case 'transcript':
+      if (msg.raw) log(`[${msg.speaker === 'others' ? 'OTHERS' : 'ME'}] ${msg.cleaned || msg.raw}`);
+      break;
+    case 'auth_error':
+      log('AUTH ERROR: ' + (msg.reason || 'invalid pairing key'));
+      break;
+  }
+}
+
+// ── Stream acquisition (needs a one-time user gesture for OS audio permission) ─
+async function ensureStreams() {
+  if (micStream && micStream.active) return true;
+  const micId = micSel.value;
+  micStream = await navigator.mediaDevices.getUserMedia({
+    audio: micId ? { deviceId: { exact: micId } } : { sampleRate: 16000, channelCount: 1 },
+  });
+  dispStream = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
+  dispStream.getVideoTracks().forEach(t => t.stop());
+  othersStream = new MediaStream(dispStream.getAudioTracks());
+  if (othersStream.getAudioTracks().length === 0) {
+    log('WARNING: no system-audio (loopback) track. OTHERS will be silent.');
+  }
+  // Meters run continuously while armed so the silence gate is warm before capture.
+  meterMe = setupMeter(micStream, barMe, 'me');
+  meterOt = othersStream.getAudioTracks().length ? setupMeter(othersStream, barOt, 'others') : null;
+  if (!rafId) drawMeters();
+  armed = true;
+  return true;
+}
+
+async function arm() {
+  try {
+    await ensureStreams();
+    log('Microphone and system audio enabled on this device.');
+    if (pendingCapture) { pendingCapture = false; beginCapture(); }
+    else refreshState();
+  } catch (e) {
+    log('Could not enable audio: ' + e.message);
+    refreshState();
+  }
+}
+
+function setupMeter(stream, barEl, chan) {
+  const ctx = new AudioContext();
+  const src = ctx.createMediaStreamSource(stream);
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 1024;
+  src.connect(analyser);
+  const data = new Uint8Array(analyser.fftSize);
+  function readLevel() {
+    analyser.getByteTimeDomainData(data);
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) { const v = (data[i] - 128) / 128; sum += v * v; }
+    const rms = Math.sqrt(sum / data.length);
+    if (barEl) barEl.style.width = Math.min(100, rms * 400) + '%';
+    // Hysteresis gate
+    const st = speech[chan];
+    const now = Date.now();
+    if (!st.spk && rms > RMS_ON) { st.spk = true; st.spkSince = now; }
+    else if (st.spk && rms < RMS_OFF) { st.spk = false; }
+    if (st.spk && now - st.spkSince >= MIN_SPEECH_MS) { st.seg = true; st.last = now; }
+    return rms;
+  }
+  return { ctx, analyser, readLevel };
+}
+
+function drawMeters() {
+  meterMe?.readLevel();
+  meterOt?.readLevel();
+  rafId = requestAnimationFrame(drawMeters);
+}
+
+// ── Capture (recording + streaming), driven by the engine ─────────────────────
+async function beginCapture() {
+  if (capturing) return;            // idempotent
+  if (!armed) {                     // need a one-time gesture first
+    try { await ensureStreams(); }
+    catch (e) { pendingCapture = true; log('Capture requested but this device needs to be enabled first.'); refreshState(); return; }
+  }
+  capturing = true;
+  refreshState();
+  const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/ogg;codecs=opus';
+  startChannel(micStream, 'me', (r) => { micRecorder = r; }, (t) => { micSegTimer = t; }, mime);
+  if (othersStream && othersStream.getAudioTracks().length) {
+    startChannel(othersStream, 'others', (r) => { othersRecorder = r; }, (t) => { otSegTimer = t; }, mime);
+  }
+  log('Capturing.');
+}
+
 function encodeFrame(speaker, arrayBuffer) {
   const frame = new Uint8Array(1 + arrayBuffer.byteLength);
   frame[0] = speaker === 'others' ? 1 : 0;
@@ -66,200 +279,75 @@ function encodeFrame(speaker, arrayBuffer) {
   return frame.buffer;
 }
 
-function openWebSocket() {
-  return new Promise((resolve, reject) => {
-    const qs = new URLSearchParams({ mode: 'auto', role: 'helper' });
-    if (pairingKey) {
-      qs.set('key', pairingKey);
+// Cycle the recorder so each segment is a COMPLETE, self-contained file, and only
+// send segments that contained speech (silence gate) to save transcription cost.
+function startChannel(stream, speaker, assignRecorder, assignTimer, mime) {
+  if (!capturing) return;
+  let parts = [];
+  speech[speaker].seg = false;
+  const rec = new MediaRecorder(stream, { mimeType: mime });
+  assignRecorder(rec);
+  rec.ondataavailable = (e) => { if (e.data && e.data.size) parts.push(e.data); };
+  rec.onstop = async () => {
+    const blob = new Blob(parts, { type: mime });
+    parts = [];
+    const voiced = speech[speaker].seg || (Date.now() - speech[speaker].last < POSTROLL_MS);
+    if (voiced && blob.size > 1200 && ws?.readyState === WebSocket.OPEN) {
+      try { ws.send(encodeFrame(speaker, await blob.arrayBuffer())); } catch (_) {}
     }
-    const wsUrl = engineUrl.replace(/^http/, 'ws') + `/session/${sessionId}/ws?${qs}`;
-    log(`Connecting WebSocket: ${wsUrl.replace(pairingKey, pairingKey ? '[key]' : '')}`);
-    ws = new WebSocket(wsUrl);
-    ws.binaryType = 'arraybuffer';
-
-    ws.onopen = () => {
-      log('WebSocket connected.');
-      resolve();
-    };
-    ws.onerror = () => reject(new Error('WebSocket connection failed'));
-    ws.onmessage = (evt) => {
-      try {
-        const msg = JSON.parse(evt.data);
-        if (msg.type === 'transcript' && msg.raw) {
-          const speaker = msg.speaker === 'others' ? 'OTHERS' : 'ME';
-          log(`[${speaker}] ${msg.cleaned || msg.raw}`);
-        } else if (msg.type === 'auth_error') {
-          log(`AUTH ERROR: ${msg.reason || 'invalid pairing key'}`);
-          log('Please check your pairing key in the settings above.');
-          setStatus('error');
-        }
-      } catch (_) {}
-    };
-    ws.onclose = (evt) => {
-      log(`WebSocket closed. ${evt.code === 4401 ? '(Auth failed — check pairing key)' : ''}`);
-    };
-
-    setTimeout(() => reject(new Error('WebSocket timeout')), 10000);
-  });
+    if (capturing) startChannel(stream, speaker, assignRecorder, assignTimer, mime);
+  };
+  rec.start();
+  assignTimer(setTimeout(() => { try { rec.stop(); } catch (_) {} }, CHUNK_MS));
 }
 
-function setupMeter(stream, barEl) {
-  const ctx = new AudioContext();
-  const src = ctx.createMediaStreamSource(stream);
-  const analyser = ctx.createAnalyser();
-  analyser.fftSize = 1024;
-  src.connect(analyser);
-  const data = new Uint8Array(analyser.fftSize);
-
-  function readLevel() {
-    analyser.getByteTimeDomainData(data);
-    let sum = 0;
-    for (let i = 0; i < data.length; i++) {
-      const v = (data[i] - 128) / 128;
-      sum += v * v;
-    }
-    const rms = Math.sqrt(sum / data.length);
-    barEl.style.width = Math.min(100, rms * 400) + '%';
-    return rms;
-  }
-
-  return { ctx, readLevel };
-}
-
-async function start() {
-  if (!pairingKey) {
-    log('WARNING: No pairing key set. Please paste your key from the profile page and click Save first.');
-    log('Connecting without a key — will only work if the server allows unauthenticated connections.');
-  }
-
-  startBtn.disabled = true;
-  setStatus('connecting');
-
-  // Use the code from the input field, or generate a new one
-  const inputVal = sessionInput.value.trim();
-  sessionId = inputVal || generateShortCode();
-  sessionInput.value = sessionId;
-  sessionInput.disabled = true;
-
-  log(`Session code: ${sessionId}`);
-  if (!inputVal) {
-    log('No code entered — generated a new session. Share this code with the browser session page.');
-  } else {
-    log('Using existing session code. Browser session page should use the same code.');
-  }
-
-  try {
-    await openWebSocket();
-    setStatus('live');
-
-    // ME channel — selected or default microphone
-    const micId = micSel.value;
-    micStream = await navigator.mediaDevices.getUserMedia({
-      audio: micId ? { deviceId: { exact: micId } } : { sampleRate: 16000, channelCount: 1 },
-    });
-    log('Microphone stream open.');
-
-    // OTHERS channel — WASAPI system loopback via Electron setDisplayMediaRequestHandler
-    dispStream = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
-    dispStream.getVideoTracks().forEach(t => t.stop());
-    const othersStream = new MediaStream(dispStream.getAudioTracks());
-
-    if (othersStream.getAudioTracks().length === 0) {
-      log('WARNING: No loopback audio track — system audio may be muted or unsupported.');
-    } else {
-      log('System loopback stream open.');
-    }
-
-    // Level meters
-    const meterMe = setupMeter(micStream, barMe);
-    const meterOt = othersStream.getAudioTracks().length > 0
-      ? setupMeter(othersStream, barOt)
-      : null;
-    analyserCtxMe = meterMe.ctx;
-    analyserCtxOt = meterOt?.ctx;
-
-    function drawMeters() {
-      meterMe.readLevel();
-      meterOt?.readLevel();
-      rafId = requestAnimationFrame(drawMeters);
-    }
-    drawMeters();
-
-    const meMime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-      ? 'audio/webm;codecs=opus'
-      : 'audio/ogg;codecs=opus';
-
-    capturing = true;
-
-    // Cycle each recorder so every segment is a COMPLETE, self-contained file.
-    // Continuous timeslice mode only writes the container header into the first
-    // chunk, leaving later chunks undecodable by the engine — that was why the
-    // OTHERS stream barely produced any transcripts.
-    function cycleChannel(stream, speaker, assignRecorder, assignTimer) {
-      if (!capturing) return;
-      let parts = [];
-      const rec = new MediaRecorder(stream, { mimeType: meMime });
-      assignRecorder(rec);
-      rec.ondataavailable = (e) => { if (e.data && e.data.size) parts.push(e.data); };
-      rec.onstop = async () => {
-        const blob = new Blob(parts, { type: meMime });
-        parts = [];
-        if (blob.size > 1200 && ws?.readyState === WebSocket.OPEN) {
-          try { ws.send(encodeFrame(speaker, await blob.arrayBuffer())); } catch (_) {}
-        }
-        if (capturing) cycleChannel(stream, speaker, assignRecorder, assignTimer);
-      };
-      rec.start();
-      assignTimer(setTimeout(() => { try { rec.stop(); } catch (_) {} }, CHUNK_MS));
-    }
-
-    cycleChannel(micStream, 'me', (r) => { micRecorder = r; }, (t) => { micSegTimer = t; });
-    log(`ME recorder started (${meMime}, ${CHUNK_MS}ms segments).`);
-
-    if (othersStream.getAudioTracks().length > 0) {
-      cycleChannel(othersStream, 'others', (r) => { othersRecorder = r; }, (t) => { otSegTimer = t; });
-      log('OTHERS recorder started.');
-    }
-
-    stopBtn.disabled = false;
-    log('Session active. Transcripts will appear above.');
-  } catch (err) {
-    log('ERROR: ' + err.message);
-    setStatus('error');
-    stop();
-  }
-}
-
-function stop() {
+function endCapture(keepStreams) {
   capturing = false;
   if (micSegTimer) { clearTimeout(micSegTimer); micSegTimer = null; }
   if (otSegTimer) { clearTimeout(otSegTimer); otSegTimer = null; }
-  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+  try { micRecorder?.stop(); } catch (_) {}
+  try { othersRecorder?.stop(); } catch (_) {}
+  micRecorder = null; othersRecorder = null;
+  if (!keepStreams) disarm();
+  if (barMe) barMe.style.width = '0';
+  if (barOt) barOt.style.width = '0';
+}
 
-  micRecorder?.stop();
-  othersRecorder?.stop();
+function disarm() {
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
   micStream?.getTracks().forEach(t => t.stop());
   dispStream?.getTracks().forEach(t => t.stop());
-  analyserCtxMe?.close();
-  analyserCtxOt?.close();
+  try { meterMe?.ctx.close(); } catch (_) {}
+  try { meterOt?.ctx.close(); } catch (_) {}
+  micStream = null; dispStream = null; othersStream = null; meterMe = null; meterOt = null;
+  armed = false;
+}
 
-  if (ws?.readyState === WebSocket.OPEN) ws.close();
-  ws = null;
-  micRecorder = null;
-  othersRecorder = null;
-  micStream = null;
-  dispStream = null;
-  analyserCtxMe = null;
-  analyserCtxOt = null;
-  barMe.style.width = '0';
-  barOt.style.width = '0';
-
-  sessionInput.disabled = false;
-
-  setStatus('idle');
-  startBtn.disabled = false;
-  stopBtn.disabled = true;
-  log('Session stopped.');
+// ── Mic hot-swap (no teardown of the connection or the OTHERS channel) ─────────
+async function swapMic() {
+  if (!armed) return;
+  const micId = micSel.value;
+  try {
+    const newMic = await navigator.mediaDevices.getUserMedia({
+      audio: micId ? { deviceId: { exact: micId } } : { sampleRate: 16000, channelCount: 1 },
+    });
+    // Stop old ME recorder + tracks, swap stream, rebuild ME meter.
+    const wasCapturing = capturing;
+    if (micSegTimer) { clearTimeout(micSegTimer); micSegTimer = null; }
+    try { micRecorder?.stop(); } catch (_) {}
+    micRecorder = null;
+    micStream?.getTracks().forEach(t => t.stop());
+    try { meterMe?.ctx.close(); } catch (_) {}
+    micStream = newMic;
+    meterMe = setupMeter(micStream, barMe, 'me');
+    log('Microphone switched.');
+    if (wasCapturing) {
+      const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/ogg;codecs=opus';
+      startChannel(micStream, 'me', (r) => { micRecorder = r; }, (t) => { micSegTimer = t; }, mime);
+    }
+  } catch (e) {
+    log('Could not switch microphone: ' + e.message);
+  }
 }
 
 async function listDevices() {
@@ -273,63 +361,58 @@ async function listDevices() {
       o.textContent = d.label || `Microphone ${micSel.options.length + 1}`;
       micSel.appendChild(o);
     }
-    log(`Found ${inputs.length} microphone device(s).`);
   } catch (err) {
     log('Could not list devices: ' + err.message);
   }
 }
 
-// Save pairing key handler
+// ── Pairing key ───────────────────────────────────────────────────────────────
 saveKeyBtn.addEventListener('click', async () => {
   const val = pairingKeyInput.value.trim();
   if (!val) { log('Pairing key is empty — not saved.'); return; }
-  if (!val.startsWith('smc1_')) { log('WARNING: This does not look like a valid pairing key (should start with smc1_).'); }
+  if (!val.startsWith('smc1_')) log('WARNING: this does not look like a valid pairing key (should start with smc1_).');
   pairingKey = val;
   const result = await window.smc?.savePairingKey(val);
   if (result?.ok !== false) {
     keySavedBadge.style.display = 'inline';
-    log('Pairing key saved securely.');
+    log('Pairing key saved. Connecting…');
     setTimeout(() => { keySavedBadge.style.display = 'none'; }, 3000);
+    intentionalClose = true;
+    try { ws?.close(); } catch (_) {}
+    intentionalClose = false;
+    reconnectIdx = 0;
+    connect();
   } else {
     log('Failed to save pairing key: ' + (result?.error || 'unknown error'));
   }
 });
 
-// Init
+armBtn.addEventListener('click', arm);
+micSel.addEventListener('change', swapMic);
+
+// ── Init ──────────────────────────────────────────────────────────────────────
 (async () => {
+  deviceId = getDeviceId();
   try {
     const config = await window.smc.getConfig();
     engineUrl = config.engineUrl;
     engineUrlEl.textContent = 'Engine: ' + engineUrl;
     log('SMC Helper started.');
-    log('Engine: ' + engineUrl);
     log(`Electron ${window.smc.versions.electron} / Chromium ${window.smc.versions.chrome}`);
-
-    // Load saved pairing key
     const keyResult = await window.smc.loadPairingKey();
     if (keyResult?.key) {
       pairingKey = keyResult.key;
       pairingKeyInput.value = keyResult.key;
       keySavedBadge.style.display = 'inline';
-      log('Pairing key loaded from secure storage.');
       setTimeout(() => { keySavedBadge.style.display = 'none'; }, 2000);
+      log('Pairing key loaded.');
     } else {
       log('No pairing key found. Get yours from Silent Meeting Copilot → Profile → Desktop helper.');
     }
-
-    log('Enter a session code above (from the browser page) then click Start.');
   } catch (err) {
     log('Config load error: ' + err);
   }
-
   await listDevices();
+  refreshState();
+  connect();
 })();
-
-startBtn.addEventListener('click', start);
-stopBtn.addEventListener('click', stop);
-
-// Handle tray toggle-capture IPC
-window.smc?.onToggleCapture((shouldCapture) => {
-  if (shouldCapture && startBtn && !startBtn.disabled) start();
-  else if (!shouldCapture && stopBtn && !stopBtn.disabled) stop();
-});
