@@ -119,33 +119,23 @@ export class SessionDO {
 // Diarization is enabled when Deepgram is used — speaker labels are embedded inline
 // in the returned text as "[Speaker N] ..." segments. Cloudflare Whisper has no
 // diarization capability; that path always returns a single unlabelled string.
-async function transcribeDeepgram(audioBytes, apiKey, lang) {
-  const params = new URLSearchParams({
-    model: 'nova-2',
-    smart_format: 'true',
-    diarize: 'true',      // P3: speaker diarization — Deepgram path only
-  });
+async function transcribeDeepgram(audioBytes, env, lang) {
+  // Deepgram nova-3 hosted natively on Cloudflare Workers AI — no external account
+  // or API key. The returned object uses the same Deepgram results shape as the REST
+  // API, so the parsing below is unchanged.
+  const params = {
+    audio: { body: new Response(audioBytes).body, contentType: 'audio/webm' },
+    smart_format: true,
+    punctuate: true,
+    diarize: true, // P3: speaker diarization — emitted as [Speaker N] below
+  };
   if (lang) {
-    params.set('language', lang);
+    params.language = lang;
   } else {
-    params.set('detect_language', 'true');
+    params.detect_language = true;
   }
 
-  const resp = await fetch(`https://api.deepgram.com/v1/listen?${params}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Token ${apiKey}`,
-      'Content-Type': 'application/octet-stream',
-    },
-    body: audioBytes,
-  });
-
-  if (!resp.ok) {
-    const body = await resp.text().catch(() => '');
-    throw new Error(`Deepgram error ${resp.status}: ${body}`);
-  }
-
-  const data = await resp.json();
+  const data = await env.AI.run('@cf/deepgram/nova-3', params);
   const alt = data?.results?.channels?.[0]?.alternatives?.[0];
   const transcript = (alt?.transcript || '').trim();
   const words = alt?.words;
@@ -185,31 +175,21 @@ async function transcribeDeepgram(audioBytes, apiKey, lang) {
 //   LLM: @cf/meta/llama-3.2-3b-instruct   (llama-3.1 deprecated 2026-05-30)
 export async function transcribeAndClean(audioBytes, env, lang = null, mode = 'auto') {
   let provider;
-
-  if (mode === 'english') {
-    // Explicit English → always Cloudflare, regardless of key
-    provider = 'cloudflare';
-  } else if (mode === 'hindi-urdu') {
-    // Explicit Hindi/Urdu → Deepgram required; never silently fall back
-    if (!env.DEEPGRAM_API_KEY) {
-      return { raw: '', cleaned: '', provider: 'deepgram', error: 'deepgram_unavailable' };
-    }
-    provider = 'deepgram';
-  } else {
-    // auto: use Deepgram if key is configured, otherwise Cloudflare
-    provider = env.DEEPGRAM_API_KEY ? 'deepgram' : 'cloudflare';
-  }
-
   let raw = '';
 
-  if (provider === 'deepgram') {
-    raw = await transcribeDeepgram(audioBytes, env.DEEPGRAM_API_KEY, lang);
-  } else {
-    // Cloudflare Workers AI Whisper — input must be a number array
+  if (mode === 'english') {
+    // Explicit English → Cloudflare Whisper (fast, multilingual base model).
+    provider = 'cloudflare';
     const input = { audio: [...audioBytes] };
     if (lang) input.language = lang;
     const result = await env.AI.run('@cf/openai/whisper', input);
     raw = (result.text || '').trim();
+  } else {
+    // hindi-urdu or auto → Deepgram nova-3 via Workers AI (no external key).
+    // 'multi' = automatic multilingual detection (covers Hindi + English mixing).
+    provider = 'deepgram-nova3';
+    const dgLang = mode === 'hindi-urdu' ? 'multi' : (lang || 'multi');
+    raw = await transcribeDeepgram(audioBytes, env, dgLang);
   }
 
   if (!raw) return { raw: '', cleaned: '', provider };

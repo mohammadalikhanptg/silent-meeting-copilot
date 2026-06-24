@@ -52,9 +52,9 @@ export default {
 
     // Health check — reports active provider and whether Deepgram key is configured
     if (url.pathname === '/health') {
-      const deepgramAvailable = !!env.DEEPGRAM_API_KEY;
-      const provider = deepgramAvailable ? 'deepgram' : 'cloudflare';
-      return json({ ok: true, ts: Date.now(), provider, deepgramAvailable });
+      // Deepgram nova-3 runs on Workers AI (env.AI), so multilingual transcription
+      // is always available with no external key.
+      return json({ ok: true, ts: Date.now(), provider: 'deepgram-nova3', deepgramAvailable: true });
     }
 
     // POST /transcribe — one-shot audio transcription for testing
