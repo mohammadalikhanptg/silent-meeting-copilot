@@ -4,12 +4,15 @@ export class SessionDO {
   constructor(state, env) {
     this.state = state;
     this.env = env;
-    // Fallback only. The authoritative per-connection lang/mode/role lives in the
-    // socket attachment (serializeAttachment), which survives DO hibernation —
-    // unlike instance fields, which are wiped when the DO is evicted.
+    // Fallback only. Authoritative per-connection lang/mode/role/cid lives in the
+    // socket attachment (serializeAttachment), which survives DO hibernation.
     this.lang = null;
     this.mode = 'auto';
   }
+
+  static get GRACE_MS() { return 30 * 1000; }              // cockpit-gone grace before suspend
+  static get HARD_CAP_MS() { return 3 * 60 * 60 * 1000; }  // 3h hard session cap
+  static get TICK_MS() { return 60 * 1000; }               // periodic safety tick while live
 
   async fetch(request) {
     if (request.headers.get('Upgrade') === 'websocket') {
@@ -23,131 +26,203 @@ export class SessionDO {
     const lang = url.searchParams.get('lang') || null;
     const mode = url.searchParams.get('mode') || 'auto';
     const role = url.searchParams.get('role') === 'helper' ? 'helper' : 'browser';
+    const cid = (crypto.randomUUID && crypto.randomUUID()) || (String(Date.now()) + Math.random().toString(36).slice(2));
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.state.acceptWebSocket(server);
-    // Hibernation-safe per-socket state.
-    server.serializeAttachment({ lang, mode, role });
+    server.serializeAttachment({ lang, mode, role, cid, epoch: 0 });
 
     // The browser cockpit's connect-time mode/lang becomes the session default.
     if (role === 'browser' && (mode || lang)) {
       await this.state.storage.put({ mode: mode || 'auto', lang: lang || null });
     }
 
-    const capturing = (await this.state.storage.get('capturing')) === true;
+    const st = await this._loadState();
+
     if (role === 'helper') {
-      // Helper (re)connected; if a session is already live, start it immediately.
-      if (capturing) {
-        const sess = await this.state.storage.get(['mode', 'lang']);
-        try {
-          server.send(JSON.stringify({
-            type: 'capture', action: 'start',
-            mode: sess.get('mode') || 'auto',
-            lang: sess.has('lang') ? sess.get('lang') : null,
-          }));
-        } catch (_) {}
+      if (st.managed) {
+        // Newest helper wins: elect this one active, demote any others.
+        await this._electHelper(server, cid, st);
+      } else if (st.capturing) {
+        // Legacy path (old /session/:id/ws): resume immediately on reconnect.
+        this._sendCaptureStart(server, st);
       }
     } else {
-      // Cockpit: report whether a helper is attached and whether we are live.
-      try { server.send(JSON.stringify({ type: 'helper_status', connected: this._helperConnected(), capturing })); } catch (_) {}
+      // Cockpit connected. If a suspend grace was pending, cancel it (cockpit returned).
+      if (st.managed && st.capturing && st.graceUntil) {
+        await this.state.storage.put({ graceUntil: null });
+        st.graceUntil = null;
+      }
+      try { server.send(JSON.stringify(this._sessionStateMsg(st))); } catch (_) {}
+      try { server.send(JSON.stringify({ type: 'helper_status', connected: this._helperConnected(), capturing: st.capturing })); } catch (_) {}
     }
 
     this._broadcastHelperStatus();
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  _helperConnected() {
+  async _loadState() {
+    const m = await this.state.storage.get(['managed','capturing','status','mode','lang','epoch','activeHelperId','captureStartedAt','graceUntil']);
+    return {
+      managed: m.get('managed') === true,
+      capturing: m.get('capturing') === true,
+      status: m.get('status') || 'idle',
+      mode: m.get('mode') || 'auto',
+      lang: m.has('lang') ? m.get('lang') : null,
+      epoch: m.get('epoch') || 0,
+      activeHelperId: m.get('activeHelperId') || null,
+      captureStartedAt: m.get('captureStartedAt') || 0,
+      graceUntil: m.get('graceUntil') || null,
+    };
+  }
+
+  _helpers() {
+    const out = [];
     for (const ws of this.state.getWebSockets()) {
       const att = ws.deserializeAttachment();
-      if (att && att.role === 'helper') return true;
+      if (att && att.role === 'helper') out.push(ws);
     }
-    return false;
+    return out;
   }
+
+  _browsers() {
+    const out = [];
+    for (const ws of this.state.getWebSockets()) {
+      const att = ws.deserializeAttachment();
+      if (att && att.role === 'browser') out.push(ws);
+    }
+    return out;
+  }
+
+  _helperConnected() { return this._helpers().length > 0; }
 
   _broadcastHelperStatus() {
     this._broadcast({ type: 'helper_status', connected: this._helperConnected() });
   }
 
-  // Called by the Workers runtime for each message on any accepted WebSocket.
+  _activeHelperPresent(st) {
+    if (!st.activeHelperId) return false;
+    return this._helpers().some(ws => (ws.deserializeAttachment() || {}).cid === st.activeHelperId);
+  }
+
+  _sessionStateMsg(st) {
+    return {
+      type: 'session_state',
+      status: st.status,
+      capturing: st.capturing,
+      helperConnected: this._helperConnected(),
+      activeHelper: this._activeHelperPresent(st),
+    };
+  }
+
+  _sendCaptureStart(ws, st) {
+    try { ws.send(JSON.stringify({ type: 'capture', action: 'start', mode: st.mode || 'auto', lang: st.lang ?? null })); } catch (_) {}
+  }
+
+  // Elect `server` (cid) as the single active helper; demote any others.
+  async _electHelper(server, cid, st) {
+    const epoch = (st.epoch || 0) + 1;
+    await this.state.storage.put({ activeHelperId: cid, epoch });
+    try { const a = server.deserializeAttachment() || {}; a.epoch = epoch; server.serializeAttachment(a); } catch (_) {}
+    for (const ws of this._helpers()) {
+      const a = ws.deserializeAttachment() || {};
+      if (a.cid !== cid) {
+        try { ws.send(JSON.stringify({ type: 'capture', action: 'stop' })); } catch (_) {}
+        try { ws.send(JSON.stringify({ type: 'helper_demoted', reason: 'another helper became active' })); } catch (_) {}
+      }
+    }
+    st.epoch = epoch; st.activeHelperId = cid;
+    if (st.capturing) this._sendCaptureStart(server, st);
+    this._broadcast(this._sessionStateMsg(st));
+  }
+
   async webSocketMessage(ws, message) {
     try {
       const att = ws.deserializeAttachment() || {};
       const lang = att.lang || null;
       const mode = att.mode || 'auto';
       const role = att.role || 'browser';
+      const cid = att.cid || null;
 
-      // Text frames are control messages.
       if (typeof message === 'string') {
         const ctrl = JSON.parse(message);
+
         if (ctrl.type === 'config') {
           const next = { ...att };
           if (ctrl.lang !== undefined) next.lang = ctrl.lang || null;
           if (ctrl.mode !== undefined) next.mode = ctrl.mode || 'auto';
           ws.serializeAttachment(next);
-          // A browser sets the session-wide mode/lang used to transcribe ALL audio
-          // (including the helper's), and pushes it to a live helper.
           if (role === 'browser') {
             const patch = {};
             if (ctrl.mode !== undefined) patch.mode = ctrl.mode || 'auto';
             if (ctrl.lang !== undefined) patch.lang = ctrl.lang || null;
             if (Object.keys(patch).length) await this.state.storage.put(patch);
             if ((await this.state.storage.get('capturing')) === true) {
-              const sess = await this.state.storage.get(['mode', 'lang']);
-              this._sendToHelpers({ type: 'capture', action: 'config',
-                mode: sess.get('mode') || 'auto',
-                lang: sess.has('lang') ? sess.get('lang') : null });
+              const sess = await this.state.storage.get(['mode','lang']);
+              this._sendToHelpers({ type: 'capture', action: 'config', mode: sess.get('mode') || 'auto', lang: sess.has('lang') ? sess.get('lang') : null });
             }
           }
-        } else if (ctrl.type === 'control' && role === 'browser') {
-          // Cockpit start/stop drives the helper(s).
-          if (ctrl.action === 'start') {
-            const patch = { capturing: true };
+          return;
+        }
+
+        if (ctrl.type === 'heartbeat') {
+          if (role === 'browser') { try { ws.send(JSON.stringify({ type: 'pong', ts: Date.now() })); } catch (_) {} }
+          return;
+        }
+
+        if (ctrl.type === 'control' && role === 'browser') {
+          if (ctrl.action === 'start' || ctrl.action === 'resume') {
+            const now = Date.now();
+            const patch = { managed: true, capturing: true, status: 'active', captureStartedAt: now, graceUntil: null };
             if (ctrl.mode !== undefined) patch.mode = ctrl.mode || 'auto';
             if (ctrl.lang !== undefined) patch.lang = ctrl.lang || null;
             await this.state.storage.put(patch);
-            const sess = await this.state.storage.get(['mode', 'lang']);
-            this._sendToHelpers({ type: 'capture', action: 'start',
-              mode: sess.get('mode') || 'auto',
-              lang: sess.has('lang') ? sess.get('lang') : null });
-            this._broadcast({ type: 'session_state', capturing: true, helperConnected: this._helperConnected() });
+            let st = await this._loadState();
+            const helpers = this._helpers();
+            if (helpers.length) {
+              const newest = helpers[helpers.length - 1];
+              await this._electHelper(newest, (newest.deserializeAttachment() || {}).cid, st);
+            } else {
+              this._broadcast(this._sessionStateMsg(st));
+            }
+            await this._ensureAlarm();
           } else if (ctrl.action === 'stop') {
-            await this.state.storage.put({ capturing: false });
+            await this.state.storage.put({ managed: true, capturing: false, status: 'ended', graceUntil: null, activeHelperId: null });
             this._sendToHelpers({ type: 'capture', action: 'stop' });
-            this._broadcast({ type: 'session_state', capturing: false, helperConnected: this._helperConnected() });
+            const st = await this._loadState();
+            this._broadcast(this._sessionStateMsg(st));
           }
         }
         return;
       }
 
-      // Binary frame: byte 0 is the speaker (0 = me, 1 = others); the remainder is a
-      // COMPLETE, self-contained audio file (the browser/helper now cycle the recorder
-      // so every segment has its own container header and decodes standalone).
+      // Binary frame: byte 0 = speaker (0 me, 1 others); remainder is a COMPLETE audio file.
       const bytes = new Uint8Array(message);
       if (bytes.length < 2) return;
       const speaker = bytes[0] === 1 ? 'others' : 'me';
 
-      // Double-capture guard: when a desktop helper is feeding this session it is the
-      // authoritative ME source. Drop browser-origin ME audio so the operator is not
-      // transcribed twice. (Server-side, so it holds even if the browser keeps sending.)
-      if (speaker === 'me' && role === 'browser' && this._helperConnected()) return;
+      const st = await this._loadState();
+      if (st.managed) {
+        // Remote-controlled session: enforce capture authorisation in the DO.
+        if (!st.capturing) return;
+        if (role === 'helper') {
+          if (cid !== st.activeHelperId) return;            // not the active helper
+        } else if (this._activeHelperPresent(st)) {
+          return;                                           // browser fallback only when no active helper
+        }
+      } else {
+        // Legacy session (old /session/:id/ws): preserve original behaviour.
+        if (speaker === 'me' && role === 'browser' && this._helperConnected()) return;
+      }
 
       const audio = bytes.slice(1);
-      // Transcribe with the session-wide mode/lang chosen by the browser cockpit,
-      // so the helper's audio uses the operator's language, not its connect default.
-      const sess = await this.state.storage.get(['mode', 'lang']);
+      const sess = await this.state.storage.get(['mode','lang']);
       const useMode = sess.get('mode') || mode || 'auto';
       const useLang = sess.has('lang') ? sess.get('lang') : (lang ?? null);
       const result = await transcribeAndClean(audio, this.env, useLang, useMode);
       if (result.error === 'deepgram_unavailable') {
-        // Notify client explicitly — do NOT silently fall back to English.
-        this._broadcast({
-          type: 'error',
-          code: 'deepgram_unavailable',
-          message:
-            'Hindi/Urdu mode requires a Deepgram API key that has not been configured on this server. ' +
-            'Please switch to English mode or contact the administrator.',
-        });
+        this._broadcast({ type: 'error', code: 'deepgram_unavailable', message: 'Hindi/Urdu mode requires a Deepgram API key that has not been configured on this server. Please switch to English mode or contact the administrator.' });
       } else if (result.raw) {
         this._broadcast({ type: 'transcript', speaker, ...result });
       }
@@ -156,13 +231,67 @@ export class SessionDO {
     }
   }
 
-  async webSocketClose() {
-    // A socket left; recompute helper presence for the remaining browsers.
-    try { this._broadcastHelperStatus(); } catch (_) {}
+  async webSocketClose(ws) {
+    try {
+      const att = (ws && ws.deserializeAttachment && ws.deserializeAttachment()) || {};
+      const st = await this._loadState();
+      if (st.managed) {
+        if (att.role === 'helper' && att.cid === st.activeHelperId) {
+          const remaining = this._helpers().filter(s => s !== ws);
+          if (remaining.length) {
+            const newest = remaining[remaining.length - 1];
+            await this._electHelper(newest, (newest.deserializeAttachment() || {}).cid, st);
+          } else {
+            await this.state.storage.put({ activeHelperId: null });
+          }
+        }
+        if (att.role === 'browser' && st.capturing) {
+          const browsersLeft = this._browsers().filter(s => s !== ws).length;
+          if (browsersLeft === 0) {
+            await this.state.storage.put({ graceUntil: Date.now() + SessionDO.GRACE_MS });
+            await this._ensureAlarm();
+          }
+        }
+      }
+      this._broadcastHelperStatus();
+      const st2 = await this._loadState();
+      this._broadcast(this._sessionStateMsg(st2));
+    } catch (_) {}
   }
 
   async webSocketError(ws, error) {
     console.error('WebSocket error:', error);
+  }
+
+  async _ensureAlarm() {
+    const cur = await this.state.storage.getAlarm();
+    if (cur === null) await this.state.storage.setAlarm(Date.now() + SessionDO.TICK_MS);
+  }
+
+  async alarm() {
+    const st = await this._loadState();
+    if (!st.managed || !st.capturing) return;
+    const now = Date.now();
+    if (st.captureStartedAt && now - st.captureStartedAt >= SessionDO.HARD_CAP_MS) {
+      await this._suspend('hard_cap');
+      return;
+    }
+    const browsers = this._browsers().length;
+    if (browsers === 0 && st.graceUntil && now >= st.graceUntil) {
+      await this._suspend('cockpit_closed');
+      return;
+    }
+    let next = now + SessionDO.TICK_MS;
+    if (st.graceUntil && st.graceUntil > now) next = Math.min(next, st.graceUntil + 250);
+    if (st.captureStartedAt) next = Math.min(next, st.captureStartedAt + SessionDO.HARD_CAP_MS);
+    await this.state.storage.setAlarm(next);
+  }
+
+  async _suspend(reason) {
+    await this.state.storage.put({ capturing: false, status: 'paused', graceUntil: null });
+    this._sendToHelpers({ type: 'capture', action: 'stop' });
+    const st = await this._loadState();
+    this._broadcast({ ...this._sessionStateMsg(st), reason });
   }
 
   _broadcast(msg) {
@@ -174,11 +303,8 @@ export class SessionDO {
 
   _sendToHelpers(msg) {
     const text = JSON.stringify(msg);
-    for (const ws of this.state.getWebSockets()) {
-      const att = ws.deserializeAttachment();
-      if (att && att.role === 'helper') {
-        try { ws.send(text); } catch (_) {}
-      }
+    for (const ws of this._helpers()) {
+      try { ws.send(text); } catch (_) {}
     }
   }
 }
