@@ -44,7 +44,7 @@ export default async function AdminPage() {
   `;
 
   return (
-    <main style={{ minHeight: '100vh', background: 'var(--bg)', color: 'var(--tx)' }}>
+    <main style={{ minHeight: '100vh', background: 'transparent', color: 'var(--tx)' }}>
       <nav style={{ borderBottom: '1px solid var(--border)', padding: '12px 24px', display: 'flex', gap: 16, alignItems: 'center' }}>
         <a href="/meetings" style={{ color: 'var(--accent)', fontSize: 13, textDecoration: 'none' }}>← Sessions</a>
         <span style={{ color: 'var(--border)' }}>|</span>

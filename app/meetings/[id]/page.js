@@ -329,7 +329,7 @@ export default async function MeetingDetailPage({ params }) {
 const styles = {
   root: {
     minHeight: '100vh',
-    background: 'var(--bg)',
+    background: 'transparent',
     color: 'var(--tx)',
     fontFamily: 'var(--font-sans)',
     padding: '32px 24px',

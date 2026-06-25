@@ -1399,7 +1399,7 @@ export default function SessionPage() {
 
 const styles = {
   root: {
-    minHeight: '100vh', background: 'var(--bg)', color: 'var(--tx)',
+    minHeight: '100vh', background: 'transparent', color: 'var(--tx)',
     fontFamily: 'var(--font-sans)',
     display: 'flex', flexDirection: 'column', padding: 16, gap: 14,
     maxWidth: 1200, margin: '0 auto',

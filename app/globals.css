@@ -784,3 +784,111 @@ body {
   .auth-card { padding: 28px 20px 24px; }
   .sessions-root { padding: 20px 16px 40px; }
 }
+
+/* ==========================================================
+   THEME SKIN v3 — Liquid Glass (dark) + Claymorphism (light)
+   Layered over Design System v2. Re-skins via tokens + living
+   backgrounds + surface treatment. Appended last so it wins.
+   ========================================================== */
+
+/* ---------- DARK = LIQUID GLASS ---------- */
+:root {
+  --bg:        #080a16;
+  --bg-up:     #0c1022;
+  --bg-panel:  #121732;
+  --bg-raised: #1a2142;
+  --border-hi: rgba(255,255,255,0.30);
+  --accent:    #8a93ff;
+  --accent-hi: #b9c0ff;
+  --accent-dim: rgba(138,147,255,0.16);
+}
+
+@keyframes smc-liquid {
+  0%   { background-position: 0% 50%, 100% 50%, 50% 0%, 0% 50%; }
+  50%  { background-position: 100% 50%, 0% 50%, 50% 100%, 100% 50%; }
+  100% { background-position: 0% 50%, 100% 50%, 50% 0%, 0% 50%; }
+}
+body { background: #080a16; }
+body::before {
+  content: '';
+  position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(60% 50% at 18% 22%, rgba(120,110,255,0.22), transparent 70%),
+    radial-gradient(55% 55% at 82% 74%, rgba(40,185,225,0.16), transparent 70%),
+    radial-gradient(52% 42% at 60% 14%, rgba(175,90,255,0.13), transparent 72%),
+    linear-gradient(125deg, #080a16, #110a28 45%, #06121f);
+  background-size: 170% 170%, 170% 170%, 170% 170%, 300% 300%;
+  animation: smc-liquid 32s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) { body::before { animation: none; } }
+
+/* Liquid edge-light + faint inner glow on glass surfaces (dark) */
+.glass, .glass-raised, .session-card,
+.profile-section, .admin-section,
+.smc-coach-panel, .smc-assist-panel, .smc-followup-outer, .smc-prep-panel {
+  border-top-color: var(--border-hi);
+  box-shadow: var(--shadow-md), inset 0 1px 0 rgba(255,255,255,0.18), inset 0 -18px 34px rgba(120,130,255,0.05);
+}
+
+/* ---------- LIGHT = CLAYMORPHISM ---------- */
+[data-theme="light"] {
+  --bg:        #ecedf5;
+  --bg-up:     #e5e8f2;
+  --bg-panel:  #f6f7fc;
+  --bg-raised: #eef1f9;
+  --surf-0:    #f3f5fb;
+  --surf-1:    #f6f7fc;
+  --surf-2:    #ffffff;
+  --surf-3:    #ffffff;
+  --border:    rgba(120,130,170,0.16);
+  --border-hi: rgba(255,255,255,0.95);
+  --accent:    #5b6cff;
+  --accent-hi: #7c5cff;
+  --accent-dim: rgba(91,108,255,0.12);
+}
+
+@keyframes smc-claydrift {
+  0%   { transform: translate(0, 0); }
+  50%  { transform: translate(2%, 3%); }
+  100% { transform: translate(0, 0); }
+}
+[data-theme="light"] body { background: #ecedf5; }
+[data-theme="light"] body::before {
+  content: '';
+  position: fixed; inset: -12%; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(40% 40% at 22% 26%, rgba(120,140,255,0.16), transparent 70%),
+    radial-gradient(38% 38% at 80% 74%, rgba(255,170,140,0.13), transparent 70%);
+  animation: smc-claydrift 28s ease-in-out infinite;
+}
+
+/* Clay puffy panels (light) */
+[data-theme="light"] .glass,
+[data-theme="light"] .glass-raised,
+[data-theme="light"] .session-card,
+[data-theme="light"] .profile-section,
+[data-theme="light"] .admin-section,
+[data-theme="light"] .smc-transcript-panel,
+[data-theme="light"] .smc-coach-panel,
+[data-theme="light"] .smc-assist-panel,
+[data-theme="light"] .smc-followup-outer,
+[data-theme="light"] .smc-prep-panel {
+  background: var(--bg-panel);
+  border: 1px solid rgba(255,255,255,0.9);
+  border-radius: var(--r-lg);
+  box-shadow: 12px 12px 28px rgba(120,130,170,0.18), -10px -10px 24px rgba(255,255,255,0.92), inset 1px 1px 2px rgba(255,255,255,0.7);
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+[data-theme="light"] .smc-input,
+[data-theme="light"] .smc-textarea,
+[data-theme="light"] .smc-select,
+[data-theme="light"] .auth-input {
+  background: #eef0f8;
+  box-shadow: inset 2px 2px 5px rgba(120,130,170,0.16), inset -2px -2px 5px rgba(255,255,255,0.95);
+  border: 1px solid rgba(255,255,255,0.85);
+}
+[data-theme="light"] .session-card:hover { box-shadow: 14px 14px 32px rgba(120,130,170,0.22), -10px -10px 24px rgba(255,255,255,0.92); }
+
+/* Let the living background show through full-page containers */
+.sessions-root, .auth-root { background: transparent !important; }

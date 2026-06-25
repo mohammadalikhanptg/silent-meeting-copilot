@@ -674,7 +674,7 @@ export default function ProfilePage() {
 const styles = {
   root: {
     minHeight: '100vh',
-    background: 'var(--bg)',
+    background: 'transparent',
     color: 'var(--tx)',
     fontFamily: 'var(--font-sans)',
     maxWidth: 800,
