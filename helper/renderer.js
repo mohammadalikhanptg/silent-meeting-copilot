@@ -15,14 +15,22 @@ const saveKeyBtn = document.getElementById('saveKeyBtn');
 const keySavedBadge = document.getElementById('keySavedBadge');
 const armBtn = document.getElementById('armBtn');
 
-const CHUNK_MS = 2500;
 const HEARTBEAT_MS = 25000;
 const BACKOFF_MS = [1000, 2000, 5000, 10000, 30000, 60000];
 // Client-side silence gating (per channel) to cut transcription cost and noise.
 const RMS_ON = 0.018;        // enter "speaking" above this
 const RMS_OFF = 0.010;       // leave "speaking" below this (hysteresis)
 const MIN_SPEECH_MS = 150;   // sustained speech before a segment counts as voiced
-const POSTROLL_MS = 1500;    // keep sending briefly after speech so tails are not clipped
+
+// B1 — pause-aligned segmentation (replaces the old blind 2.5s wall-clock cut).
+// A segment closes when the speaker pauses (sustained silence via the RMS gate),
+// not on a fixed clock, so words and fast/overlapping speech are not sliced in
+// half. The max cap is a safety valve only, not the primary cut.
+const SEG_MIN_MS = 1000;     // never close a pause-bounded segment shorter than this
+const SEG_MAX_MS = 13000;    // hard safety-valve cap (within 12-15s)
+const SEG_PAUSE_MS = 350;    // sustained silence that marks a pause boundary
+const SEG_OVERLAP_MS = 300;  // trailing audio carried into the next segment
+const SEG_TICK_MS = 80;      // segmentation evaluation cadence
 
 let engineUrl = '';
 let pairingKey = '';
@@ -40,9 +48,9 @@ let pendingCapture = false; // engine asked to capture but we are not armed yet
 let demoted = false;      // another helper is the active one
 
 let micStream = null, dispStream = null, othersStream = null;
-let micRecorder = null, othersRecorder = null;
-let micSegTimer = null, otSegTimer = null;
+let chanMe = null, chanOt = null;   // per-channel segmentation controllers
 let meterMe = null, meterOt = null, rafId = null;
+let segMetrics = null;              // B6 — per-channel segment counters
 
 const speech = {
   me: { spk: false, spkSince: 0, seg: false, last: 0 },
@@ -256,6 +264,10 @@ function drawMeters() {
 }
 
 // ── Capture (recording + streaming), driven by the engine ─────────────────────
+function pickMime() {
+  return MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/ogg;codecs=opus';
+}
+
 async function beginCapture() {
   if (capturing) return;            // idempotent
   if (!armed) {                     // need a one-time gesture first
@@ -264,10 +276,11 @@ async function beginCapture() {
   }
   capturing = true;
   refreshState();
-  const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/ogg;codecs=opus';
-  startChannel(micStream, 'me', (r) => { micRecorder = r; }, (t) => { micSegTimer = t; }, mime);
+  resetMetrics();
+  const mime = pickMime();
+  chanMe = makeChannel(micStream, 'me', mime);
   if (othersStream && othersStream.getAudioTracks().length) {
-    startChannel(othersStream, 'others', (r) => { othersRecorder = r; }, (t) => { otSegTimer = t; }, mime);
+    chanOt = makeChannel(othersStream, 'others', mime);
   }
   log('Capturing.');
 }
@@ -279,38 +292,108 @@ function encodeFrame(speaker, arrayBuffer) {
   return frame.buffer;
 }
 
-// Cycle the recorder so each segment is a COMPLETE, self-contained file, and only
-// send segments that contained speech (silence gate) to save transcription cost.
-function startChannel(stream, speaker, assignRecorder, assignTimer, mime) {
-  if (!capturing) return;
+// A channel runs exactly one MediaRecorder at a time, except for a brief ~300ms
+// overlap window at each cut (two recorders) so boundary audio is shared into the
+// next segment. A periodic tick decides cuts from the RMS speech gate.
+function makeChannel(stream, speaker, mime) {
+  const c = { stream, speaker, mime, rec: null, tick: null, stopped: false };
+  startSegment(c);
+  c.tick = setInterval(() => evaluateChannel(c), SEG_TICK_MS);
+  return c;
+}
+
+// Each segment is a COMPLETE, self-contained webm/opus file (a full record→stop
+// cycle). Only voiced segments are sent (silence gate) to save transcription cost.
+function startSegment(c) {
+  if (c.stopped) return;
   let parts = [];
-  speech[speaker].seg = false;
-  const rec = new MediaRecorder(stream, { mimeType: mime });
-  assignRecorder(rec);
+  const rec = new MediaRecorder(c.stream, { mimeType: c.mime });
+  rec._startTs = Date.now();
+  rec._hadSpeech = false;
+  speech[c.speaker].seg = false;   // fresh voiced-detection window for this segment
   rec.ondataavailable = (e) => { if (e.data && e.data.size) parts.push(e.data); };
   rec.onstop = async () => {
-    const blob = new Blob(parts, { type: mime });
+    const blob = new Blob(parts, { type: c.mime });
     parts = [];
-    const voiced = speech[speaker].seg || (Date.now() - speech[speaker].last < POSTROLL_MS);
-    if (voiced && blob.size > 1200 && ws?.readyState === WebSocket.OPEN) {
-      try { ws.send(encodeFrame(speaker, await blob.arrayBuffer())); } catch (_) {}
+    const durMs = Date.now() - rec._startTs;
+    metricSegment(c.speaker, durMs, rec._hadSpeech);
+    if (rec._hadSpeech && blob.size > 1200 && ws?.readyState === WebSocket.OPEN) {
+      try { ws.send(encodeFrame(c.speaker, await blob.arrayBuffer())); metricSent(c.speaker); } catch (_) {}
     }
-    if (capturing) startChannel(stream, speaker, assignRecorder, assignTimer, mime);
   };
-  rec.start();
-  assignTimer(setTimeout(() => { try { rec.stop(); } catch (_) {} }, CHUNK_MS));
+  try { rec.start(); } catch (_) { return; }
+  c.rec = rec;
+}
+
+// Decide whether to close the current segment: on a sustained pause once past the
+// minimum length, or on the hard maximum cap as a safety valve.
+function evaluateChannel(c) {
+  if (c.stopped) return;
+  const rec = c.rec;
+  if (!rec || rec.state !== 'recording') return;
+  const st = speech[c.speaker];
+  const now = Date.now();
+  if (st.spk || st.seg) rec._hadSpeech = true;
+  const age = now - rec._startTs;
+  const speaking = st.spk;
+  const silentFor = speaking ? 0 : (now - (st.last || 0));
+  const pauseCut = rec._hadSpeech && !speaking && silentFor >= SEG_PAUSE_MS && age >= SEG_MIN_MS;
+  const maxCut = age >= SEG_MAX_MS;
+  if (pauseCut || maxCut) cutSegment(c);
+}
+
+// Start the next segment immediately, then stop the old recorder SEG_OVERLAP_MS
+// later so ~300ms of audio is shared across the seam (the engine dedupes the
+// repeated boundary words). Both recorders briefly run on the same stream.
+function cutSegment(c) {
+  const old = c.rec;
+  if (!old || old.state !== 'recording') return;
+  startSegment(c);
+  setTimeout(() => { try { old.stop(); } catch (_) {} }, SEG_OVERLAP_MS);
+}
+
+function stopChannel(c) {
+  if (!c) return;
+  c.stopped = true;
+  if (c.tick) { clearInterval(c.tick); c.tick = null; }
+  try { c.rec?.stop(); } catch (_) {}
+  c.rec = null;
 }
 
 function endCapture(keepStreams) {
   capturing = false;
-  if (micSegTimer) { clearTimeout(micSegTimer); micSegTimer = null; }
-  if (otSegTimer) { clearTimeout(otSegTimer); otSegTimer = null; }
-  try { micRecorder?.stop(); } catch (_) {}
-  try { othersRecorder?.stop(); } catch (_) {}
-  micRecorder = null; othersRecorder = null;
+  flushMetrics('stop');
+  stopChannel(chanMe); chanMe = null;
+  stopChannel(chanOt); chanOt = null;
   if (!keepStreams) disarm();
   if (barMe) barMe.style.width = '0';
   if (barOt) barOt.style.width = '0';
+}
+
+// ── B6 observability (helper side) ─────────────────────────────────────────────
+// Segments emitted per channel and a coarse duration distribution. Logged to the
+// helper window only; no audio content is recorded.
+function freshChanMetric() { return { sent: 0, total: 0, voiced: 0, durBuckets: {} }; }
+function resetMetrics() { segMetrics = { me: freshChanMetric(), others: freshChanMetric(), since: Date.now() }; }
+function metricSegment(speaker, durMs, hadSpeech) {
+  if (!segMetrics) return;
+  const c = segMetrics[speaker];
+  if (!c) return;
+  c.total++;
+  if (hadSpeech) c.voiced++;
+  const s = durMs / 1000;
+  const b = s < 1.5 ? '<1.5s' : s < 4 ? '1.5-4s' : s < 8 ? '4-8s' : s < 12 ? '8-12s' : '12s+';
+  c.durBuckets[b] = (c.durBuckets[b] || 0) + 1;
+  if (c.total % 20 === 0) flushMetrics('rolling');
+}
+function metricSent(speaker) { if (segMetrics && segMetrics[speaker]) segMetrics[speaker].sent++; }
+function flushMetrics(reason) {
+  if (!segMetrics) return;
+  for (const ch of ['me', 'others']) {
+    const c = segMetrics[ch];
+    if (!c.total) continue;
+    log(`metrics[${reason}] ${ch}: sent=${c.sent}/${c.total} voiced=${c.voiced} dur=${JSON.stringify(c.durBuckets)}`);
+  }
 }
 
 function disarm() {
@@ -331,19 +414,16 @@ async function swapMic() {
     const newMic = await navigator.mediaDevices.getUserMedia({
       audio: micId ? { deviceId: { exact: micId } } : { sampleRate: 16000, channelCount: 1 },
     });
-    // Stop old ME recorder + tracks, swap stream, rebuild ME meter.
+    // Stop old ME channel + tracks, swap stream, rebuild ME meter.
     const wasCapturing = capturing;
-    if (micSegTimer) { clearTimeout(micSegTimer); micSegTimer = null; }
-    try { micRecorder?.stop(); } catch (_) {}
-    micRecorder = null;
+    stopChannel(chanMe); chanMe = null;
     micStream?.getTracks().forEach(t => t.stop());
     try { meterMe?.ctx.close(); } catch (_) {}
     micStream = newMic;
     meterMe = setupMeter(micStream, barMe, 'me');
     log('Microphone switched.');
     if (wasCapturing) {
-      const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/ogg;codecs=opus';
-      startChannel(micStream, 'me', (r) => { micRecorder = r; }, (t) => { micSegTimer = t; }, mime);
+      chanMe = makeChannel(micStream, 'me', pickMime());
     }
   } catch (e) {
     log('Could not switch microphone: ' + e.message);

@@ -551,7 +551,9 @@ export default function SessionPage() {
     else setOthersLines(prev => prev.map(l => l === line ? { ...l, flagged: false } : l));
   }, [removeFlag]);
 
-  const stripSpk = (txt) => (typeof txt === 'string' ? txt.replace(/^\[Speaker 1\]\s*/, '') : txt);
+  // Far-end is a single voice in the batch path: strip any stray "[Speaker N]"
+  // labels (e.g. from previously stored segments) so no speaker numbers show.
+  const stripSpk = (txt) => (typeof txt === 'string' ? txt.replace(/\[Speaker \d+\]\s*/g, '') : txt);
 
   const getEngineToken = useCallback(async () => {
     const res = await fetch('/api/session/start', { method: 'POST' });
@@ -1322,7 +1324,7 @@ export default function SessionPage() {
             {/* OTHERS panel */}
             <div className="smc-transcript-panel others-panel">
               <div style={{ ...styles.panelHead, color: 'var(--others)' }}>
-                OTHERS — system audio
+                OTHERS — far-end (system audio)
                 {correctionCount > 0 && (
                   <span style={styles.correctionCountBadge}>{correctionCount} clarified</span>
                 )}

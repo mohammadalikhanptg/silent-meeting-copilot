@@ -8,6 +8,22 @@ export class SessionDO {
     // socket attachment (serializeAttachment), which survives DO hibernation.
     this.lang = null;
     this.mode = 'auto';
+    // B2 — seam dedupe state: trailing tokens of the last emitted segment per
+    // channel, used to strip boundary words duplicated by the helper's ~300ms
+    // capture overlap. In-memory; segments arrive close together during active
+    // capture so this rarely spans a DO hibernation (a missed seam dedupe is
+    // graceful). Reset on start/resume/stop/suspend.
+    this._seam = { me: [], others: [] };
+    // B6 — lightweight observability (no audio content is ever logged/persisted).
+    this._metrics = SessionDO._freshMetrics();
+  }
+
+  static _freshMetrics() {
+    return {
+      since: Date.now(),
+      me: { count: 0, empty: 0, latencyMs: 0, sizeBuckets: {} },
+      others: { count: 0, empty: 0, latencyMs: 0, sizeBuckets: {} },
+    };
   }
 
   static get GRACE_MS() { return 30 * 1000; }              // cockpit-gone grace before suspend
@@ -184,6 +200,10 @@ export class SessionDO {
         if (ctrl.type === 'control' && role === 'browser') {
           if (ctrl.action === 'start' || ctrl.action === 'resume') {
             const now = Date.now();
+            // Fresh segmentation seam + metrics window for the (re)started capture.
+            this._seam = { me: [], others: [] };
+            this._flushMetrics(ctrl.action);
+            this._metrics = SessionDO._freshMetrics();
             const patch = { managed: true, capturing: true, status: 'active', captureStartedAt: now, graceUntil: null };
             if (ctrl.mode !== undefined) patch.mode = ctrl.mode || 'auto';
             if (ctrl.lang !== undefined) patch.lang = ctrl.lang || null;
@@ -198,6 +218,8 @@ export class SessionDO {
             }
             await this._ensureAlarm();
           } else if (ctrl.action === 'stop') {
+            this._flushMetrics('stop');
+            this._seam = { me: [], others: [] };
             await this.state.storage.put({ managed: true, capturing: false, status: 'ended', graceUntil: null, activeHelperId: null });
             this._sendToHelpers({ type: 'capture', action: 'stop' });
             const st = await this._loadState();
@@ -231,8 +253,21 @@ export class SessionDO {
       const useMode = sess.get('mode') || mode || 'auto';
       const useLang = sess.has('lang') ? sess.get('lang') : (lang ?? null);
       const result = await transcribeAndClean(audio, this.env, useLang, useMode);
+
+      // B6 — record counts, latency and empty-result rate (never audio content).
+      this._recordMetric(speaker, result, audio.byteLength);
+
       if (result.raw) {
-        this._sendToBrowsers({ type: 'transcript', speaker, ...result });
+        // B2 — strip leading words duplicated by the ~300ms capture overlap with
+        // the previous segment on this channel. Word-aware, timestamp-bounded
+        // where Deepgram supplies word timings; token-overlap fallback otherwise.
+        const tokens = tokenizeTranscript(result.raw, result.words);
+        const kept = stitchOverlap(this._seam[speaker] || [], tokens);
+        this._seam[speaker] = tokens.slice(-SEAM_MAX_WORDS);
+        const text = kept.map(t => t.raw).join(' ').replace(/\s+/g, ' ').trim();
+        if (text) {
+          this._sendToBrowsers({ type: 'transcript', speaker, raw: text, cleaned: text, provider: result.provider });
+        }
       }
     } catch (err) {
       console.error('DO audio error:', err);
@@ -297,6 +332,8 @@ export class SessionDO {
   }
 
   async _suspend(reason) {
+    this._flushMetrics('suspend:' + reason);
+    this._seam = { me: [], others: [] };
     await this.state.storage.put({ capturing: false, status: 'paused', graceUntil: null });
     this._sendToHelpers({ type: 'capture', action: 'stop' });
     const st = await this._loadState();
@@ -316,21 +353,48 @@ export class SessionDO {
       try { ws.send(text); } catch (_) {}
     }
   }
+
+  // B6 — observability. Counts received segments per channel, accumulates
+  // transcription latency, tracks the empty-result rate and a coarse audio-size
+  // distribution. No audio bytes or transcript text are logged or persisted.
+  _recordMetric(speaker, result, byteLength) {
+    const m = this._metrics && this._metrics[speaker];
+    if (!m) return;
+    m.count++;
+    m.latencyMs += (result && result.latencyMs) || 0;
+    if (!result || !result.raw) m.empty++;
+    const kb = byteLength / 1024;
+    const bucket = kb < 8 ? '<8kb' : kb < 24 ? '8-24kb' : kb < 64 ? '24-64kb' : '64kb+';
+    m.sizeBuckets[bucket] = (m.sizeBuckets[bucket] || 0) + 1;
+    if (m.count % 25 === 0) this._flushMetrics('rolling');
+  }
+
+  _flushMetrics(reason) {
+    const m = this._metrics;
+    if (!m) return;
+    for (const ch of ['me', 'others']) {
+      const c = m[ch];
+      if (!c || !c.count) continue;
+      const avg = Math.round(c.latencyMs / c.count);
+      const emptyPct = Math.round((c.empty / c.count) * 100);
+      console.log(`SMC metrics [${reason}] ${ch}: segments=${c.count} empty=${c.empty} (${emptyPct}%) avgLatencyMs=${avg} sizes=${JSON.stringify(c.sizeBuckets)}`);
+    }
+  }
 }
 
-// Deepgram prerecorded REST transcription (nova-2, multilingual including Hindi/Urdu).
-// Diarization is enabled when Deepgram is used — speaker labels are embedded inline
-// in the returned text as "[Speaker N] ..." segments. Cloudflare Whisper has no
-// diarization capability; that path always returns a single unlabelled string.
+// Deepgram nova-3 prerecorded transcription, hosted natively on Cloudflare Workers
+// AI (no external account or API key). Returns the plain transcript plus word-level
+// timings (used by the seam dedupe).
+//
+// B5 — diarization is intentionally NOT requested. Cross-segment speaker continuity
+// is unreliable in this batch path, so per-segment "[Speaker N]" numbers on the
+// far-end are misleading churn. The OTHERS stream is presented as a single far-end
+// voice; the ME stream is never diarized.
 async function transcribeDeepgram(audioBytes, env, lang) {
-  // Deepgram nova-3 hosted natively on Cloudflare Workers AI — no external account
-  // or API key. The returned object uses the same Deepgram results shape as the REST
-  // API, so the parsing below is unchanged.
   const params = {
     audio: { body: new Response(audioBytes).body, contentType: 'audio/webm' },
     smart_format: true,
     punctuate: true,
-    diarize: true, // P3: speaker diarization — emitted as [Speaker N] below
   };
   if (lang) {
     params.language = lang;
@@ -341,30 +405,15 @@ async function transcribeDeepgram(audioBytes, env, lang) {
   const data = await env.AI.run('@cf/deepgram/nova-3', params);
   const alt = data?.results?.channels?.[0]?.alternatives?.[0];
   const transcript = (alt?.transcript || '').trim();
-  const words = alt?.words;
-
-  // If diarization returned per-word speaker labels, reconstruct with [Speaker N] markers.
-  // Group consecutive words from the same speaker into runs.
-  if (words && words.length > 0 && words[0]?.speaker !== undefined) {
-    // Only attribute speakers when diarization actually found more than one.
-    // A single-speaker stream is already identified as ME or OTHERS, so a
-    // blanket "[Speaker 1]" on every line is noise — omit it entirely.
-    const multiSpeaker = new Set(words.map(w => w.speaker)).size > 1;
-    let labeled = '';
-    let currentSpeaker = -1;
-    for (const w of words) {
-      const spk = w.speaker;
-      if (multiSpeaker && spk !== currentSpeaker) {
-        currentSpeaker = spk;
-        if (labeled) labeled += ' ';
-        labeled += `[Speaker ${spk + 1}] `;
-      }
-      labeled += (w.punctuated_word || w.word) + ' ';
-    }
-    return labeled.trim();
-  }
-
-  return transcript;
+  const rawWords = Array.isArray(alt?.words) ? alt.words : null;
+  const words = rawWords
+    ? rawWords.map(w => ({
+        word: w.punctuated_word || w.word || '',
+        start: typeof w.start === 'number' ? w.start : null,
+        end: typeof w.end === 'number' ? w.end : null,
+      }))
+    : null;
+  return { transcript, words };
 }
 
 // Shared transcription + cleanup used by both SessionDO and POST /transcribe.
@@ -377,35 +426,101 @@ async function transcribeDeepgram(audioBytes, env, lang) {
 // Diarization note: speaker labels are only available via the Deepgram path.
 // Cloudflare Whisper has no diarization; its output is always a single unlabelled string.
 //
-// Confirmed working Cloudflare models (probed 2026-06-23):
-//   ASR: @cf/openai/whisper               (multilingual base, number-array input)
-//   LLM: @cf/meta/llama-3.2-3b-instruct   (llama-3.1 deprecated 2026-05-30)
+// Confirmed working Cloudflare models:
+//   English ASR : @cf/openai/whisper-large-v3-turbo  (base64 audio input; far more
+//                 accurate than the old base @cf/openai/whisper)
+//   Multilingual: @cf/deepgram/nova-3                (Hindi/Urdu + auto; keyless)
+//   LLM         : @cf/meta/llama-3.2-3b-instruct     (llama-3.1 deprecated 2026-05-30)
 export async function transcribeAndClean(audioBytes, env, lang = null, mode = 'auto') {
   let provider;
   let raw = '';
+  let words = null;
+  const t0 = Date.now();
 
   if (mode === 'english') {
-    // Explicit English → Cloudflare Whisper (fast, multilingual base model).
-    provider = 'cloudflare';
-    const input = { audio: [...audioBytes] };
-    if (lang) input.language = lang;
-    const result = await env.AI.run('@cf/openai/whisper', input);
+    // B4 — explicit English → Whisper large-v3-turbo. This model takes the audio
+    // file as a base64 string (the old base model took a raw number array).
+    provider = 'cf-whisper-large-v3-turbo';
+    const input = { audio: bytesToBase64(audioBytes), task: 'transcribe', language: lang || 'en' };
+    const result = await env.AI.run('@cf/openai/whisper-large-v3-turbo', input);
     raw = (result.text || '').trim();
+    // turbo returns word_count + segment-level VTT, not a reliable per-word array;
+    // the seam dedupe falls back to token-overlap on the text for this path.
   } else {
-    // hindi-urdu or auto → Deepgram nova-3 via Workers AI (no external key).
-    // 'multi' = automatic multilingual detection (covers Hindi + English mixing).
+    // B3 — hindi-urdu → explicit Deepgram language 'hi'; auto → 'multi' (automatic
+    // multilingual detection covering Hindi + English mixing). smart_format and
+    // punctuate are retained in transcribeDeepgram.
     provider = 'deepgram-nova3';
-    const dgLang = mode === 'hindi-urdu' ? 'multi' : (lang || 'multi');
-    raw = await transcribeDeepgram(audioBytes, env, dgLang);
+    const dgLang = mode === 'hindi-urdu' ? 'hi' : (lang || 'multi');
+    const dg = await transcribeDeepgram(audioBytes, env, dgLang);
+    raw = dg.transcript;
+    words = dg.words;
   }
 
-  if (!raw) return { raw: '', cleaned: '', provider };
+  const latencyMs = Date.now() - t0;
+  if (!raw) return { raw: '', cleaned: '', provider, words: null, latencyMs };
 
   // Both providers already punctuate and smart-format. The previous LLM cleanup
   // pass (llama-3.2-3b) sometimes injected meta-commentary on short English
-  // fragments (e.g. "there is no reference text..."), so we now return the
-  // transcript verbatim. cleaned === raw means the UI shows no "[raw differs]".
-  return { raw, cleaned: raw, provider };
+  // fragments, so we return the transcript verbatim. cleaned === raw means the UI
+  // shows no "[raw differs]".
+  return { raw, cleaned: raw, provider, words, latencyMs };
+}
+
+// ---------------------------------------------------------------------------
+// Audio + transcript helpers
+// ---------------------------------------------------------------------------
+
+// Base64-encode audio bytes for models that take a base64 string (whisper turbo).
+// Chunked to avoid blowing the call stack on String.fromCharCode for large files.
+function bytesToBase64(bytes) {
+  let binary = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+// B2 — seam dedupe. The helper carries ~300ms of trailing audio into each new
+// segment so boundary words are not lost; that repeats a few words across the
+// seam. We cap the candidate overlap to a small word count (300ms is at most a
+// handful of words) so a genuine repeated phrase deeper in an utterance is never
+// collapsed.
+const SEAM_MAX_WORDS = 10;
+
+function normToken(s) {
+  return (s || '').toLowerCase().replace(/[^\p{L}\p{N}']+/gu, '');
+}
+
+// Tokenize a transcript into { raw, norm, t } words. Uses Deepgram word timings
+// when available (timestamp-aware), otherwise splits the text on whitespace.
+function tokenizeTranscript(text, words) {
+  if (Array.isArray(words) && words.length) {
+    return words
+      .map(w => ({ raw: w.word, norm: normToken(w.word), t: w.start }))
+      .filter(tok => tok.raw && tok.norm.length > 0);
+  }
+  return (text || '')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(w => ({ raw: w, norm: normToken(w), t: null }));
+}
+
+// Drop leading tokens of `tokens` that duplicate the trailing `tail` of the
+// previously emitted segment on the same channel. Returns the kept tokens.
+function stitchOverlap(tail, tokens) {
+  if (!tail.length || !tokens.length) return tokens;
+  const maxK = Math.min(tail.length, tokens.length, SEAM_MAX_WORDS);
+  let best = 0;
+  for (let k = maxK; k >= 1; k--) {
+    let ok = true;
+    for (let i = 0; i < k; i++) {
+      if (tail[tail.length - k + i].norm !== tokens[i].norm) { ok = false; break; }
+    }
+    if (ok) { best = k; break; }
+  }
+  return tokens.slice(best);
 }
 
 // ---------------------------------------------------------------------------
