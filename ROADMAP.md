@@ -287,9 +287,11 @@ Done and deployed since the status update above:
 Verified by inspection, no code change needed:
 - Helper-to-session pre-start association (backlog 7). The engine associates the helper with the user's session Durable Object at launch, not at Start, and sends current helper presence to a browser the moment it connects during preparation. The cockpit's pre-start monitor connects with a valid token and reads it. Pre-start readiness is correct end to end in code; needs only a live confirmation on the desktop test.
 
+Done and deployed (25 Jun, later still):
+- Full drag-to-reorder "jiggle" cockpit layout (the named next major item) — commit 81fd5af, Vercel READY. Opt-in "⠿ Arrange panels" mode jiggles the four live cockpit panels (Transcripts, Coaching, Live Assist, Follow-up); drag vertically to reorder (drop side decided by pointer midpoint), order persisted per-device in localStorage (smc.cockpitPanelOrder.v1, normalized on load so future panels slot in), Reset restores default. Width stays fixed, vertical only. Implemented via a .smc-cockpit flex container + CSS `order` so DOM stays stable (no remount of live transcript/coach state on reorder); zero behaviour change when Arrange is off; respects prefers-reduced-motion. Benefits from a quick operator look to tune the jiggle/feel.
+
 Revised remaining backlog (priority order):
-1. Full drag-to-reorder "jiggle" dashboard layout with saved positions. This is the next major item. It is a larger cockpit refactor and benefits from visual iteration, so it is sequenced as a dedicated piece rather than rushed; width stays fixed, vertical reorder only, opt-in edit mode, order persisted.
-2. Optional: provision a Brave search key to switch on live references in the Research column (operator cost decision).
-3. Code-sign the Windows installer (needs a code-signing certificate; operator provisioning).
-4. Security hardening, gated before any real third-party/candidate data: tokens out of the URL (needs helper rebuild), drop the signing-secret fallback with a key id for rotation, bind the engine token to the session with revocation/replay protection, strict CSP, retention/hard-delete, IDOR test, AI-provider data agreement, CI scanning, rotate the git credential.
-5. Phase 2: speaker-labelled note-taker paid option; softphone auto start/stop; per-vertical scaling.
+1. Optional: provision a Brave search key to switch on live references in the Research column (operator cost decision).
+2. Code-sign the Windows installer (needs a code-signing certificate; operator provisioning).
+3. Security hardening, gated before any real third-party/candidate data: tokens out of the URL (needs helper rebuild), drop the signing-secret fallback with a key id for rotation, bind the engine token to the session with revocation/replay protection, strict CSP, retention/hard-delete, IDOR test, AI-provider data agreement, CI scanning, rotate the git credential. (Mostly engine-side: deploy via wrangler from the Mac, so not completable from a web/Windows-only session.)
+4. Phase 2: speaker-labelled note-taker paid option; softphone auto start/stop; per-vertical scaling.
