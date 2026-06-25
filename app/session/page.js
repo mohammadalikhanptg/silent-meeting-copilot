@@ -23,6 +23,28 @@ const PARA_PAUSE_MS = 4000;
 const PARA_MAX_MS = 60000;
 const MODE_LABEL = { english: 'English (fast)', 'hindi-urdu': 'Hindi / Urdu', auto: 'Auto-detect' };
 
+// Cockpit panels that can be re-ordered vertically in opt-in "Arrange" mode.
+// Order is the default top-to-bottom layout; persisted per-device in localStorage.
+const COCKPIT_PANELS = ['transcripts', 'coaching', 'assist', 'followup'];
+const PANEL_LABELS = {
+  transcripts: 'Transcripts',
+  coaching: 'Coaching',
+  assist: 'Live Assist',
+  followup: 'Follow-up Tracker',
+};
+const LAYOUT_STORAGE_KEY = 'smc.cockpitPanelOrder.v1';
+
+// Reconcile a stored order against the current panel set: keep known keys in
+// their saved order, append any panels added since the order was saved, drop
+// anything no longer recognised. Falls back to the default on bad input.
+function normalizeOrder(saved) {
+  if (!Array.isArray(saved)) return [...COCKPIT_PANELS];
+  const known = saved.filter(k => COCKPIT_PANELS.includes(k));
+  const missing = COCKPIT_PANELS.filter(k => !known.includes(k));
+  const next = [...known, ...missing];
+  return next.length === COCKPIT_PANELS.length ? next : [...COCKPIT_PANELS];
+}
+
 function generateShortCode() {
   const chars = 'abcdefghjkmnpqrstuvwxyz';
   const letters = Array.from({ length: 3 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
@@ -63,6 +85,13 @@ export default function SessionPage() {
   const [paused, setPaused] = useState(false);
   const [showComplianceModal, setShowComplianceModal] = useState(false);
   const [prepCollapsed, setPrepCollapsed] = useState(false);
+
+  // Cockpit layout: vertical panel order + opt-in drag-to-reorder ("Arrange") mode.
+  const [panelOrder, setPanelOrder] = useState(COCKPIT_PANELS);
+  const [editLayout, setEditLayout] = useState(false);
+  const [dragKey, setDragKey] = useState(null);
+  const [dragOverKey, setDragOverKey] = useState(null);
+  const dragKeyRef = useRef(null);
 
   const wsRef = useRef(null);
   const monitorWsRef = useRef(null);
@@ -160,6 +189,14 @@ export default function SessionPage() {
         }
       })
       .catch(() => {});
+  }, []);
+
+  // On mount: restore saved cockpit panel order (per-device)
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(LAYOUT_STORAGE_KEY) || 'null');
+      setPanelOrder(normalizeOrder(saved));
+    } catch (_) {}
   }, []);
 
   // Keep URL in sync
@@ -863,6 +900,59 @@ export default function SessionPage() {
     }).catch(() => {});
   }, []);
 
+  // ---- Cockpit panel reorder (Arrange mode) ----
+  const persistOrder = useCallback((order) => {
+    setPanelOrder(order);
+    try { localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(order)); } catch (_) {}
+  }, []);
+
+  const resetLayout = useCallback(() => {
+    persistOrder([...COCKPIT_PANELS]);
+  }, [persistOrder]);
+
+  const reorderPanels = useCallback((fromKey, toKey, after) => {
+    if (!fromKey || fromKey === toKey) return;
+    setPanelOrder(prev => {
+      const next = prev.filter(k => k !== fromKey);
+      let idx = next.indexOf(toKey);
+      if (idx < 0) return prev;
+      if (after) idx += 1;
+      next.splice(idx, 0, fromKey);
+      try { localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(next)); } catch (_) {}
+      return next;
+    });
+  }, []);
+
+  const onPanelDragStart = useCallback((key, e) => {
+    dragKeyRef.current = key;
+    setDragKey(key);
+    try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', key); } catch (_) {}
+  }, []);
+
+  const onPanelDragOver = useCallback((key, e) => {
+    if (!dragKeyRef.current) return;
+    e.preventDefault();
+    try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
+    setDragOverKey(prev => (prev === key ? prev : key));
+  }, []);
+
+  const onPanelDrop = useCallback((key, e) => {
+    e.preventDefault();
+    const from = dragKeyRef.current;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const after = e.clientY > rect.top + rect.height / 2;
+    reorderPanels(from, key, after);
+    dragKeyRef.current = null;
+    setDragKey(null);
+    setDragOverKey(null);
+  }, [reorderPanels]);
+
+  const onPanelDragEnd = useCallback(() => {
+    dragKeyRef.current = null;
+    setDragKey(null);
+    setDragOverKey(null);
+  }, []);
+
   const isLive = status === 'live';
   useEffect(() => { if (isLive) setPrepCollapsed(true); }, [isLive]);
   const isConnecting = status === 'connecting';
@@ -879,6 +969,39 @@ export default function SessionPage() {
   const addressedCount = flaggedItems.filter(f => f.addressed).length;
   const showFollowUp = (isLive || status === 'stopped') && flaggedItems.length > 0;
   const showPrepPanel = !isLive && !isConnecting;
+
+  // Which cockpit panels are visible in the current state, and the order helpers
+  // that drive the CSS-`order` based vertical layout + drag-to-reorder.
+  const panelVisibility = {
+    transcripts: isLive || status === 'stopped' || status === 'error',
+    coaching: isLive || status === 'stopped',
+    assist: isLive || status === 'stopped',
+    followup: showFollowUp,
+  };
+  const visiblePanels = panelOrder.filter(k => panelVisibility[k]);
+  const orderIsCustom = panelOrder.some((k, i) => k !== COCKPIT_PANELS[i]);
+  const orderIndexOf = (key) => {
+    const i = panelOrder.indexOf(key);
+    return i < 0 ? COCKPIT_PANELS.indexOf(key) : i;
+  };
+  const panelBlockStyle = (key) => {
+    const s = { order: orderIndexOf(key), position: 'relative' };
+    if (key === 'transcripts') { s.flex = 1; s.minHeight = 0; s.display = 'flex'; s.flexDirection = 'column'; }
+    return s;
+  };
+  const panelBlockClass = (key) => {
+    let c = 'smc-panel-block';
+    if (editLayout) c += ' editing';
+    if (dragKey === key) c += ' dragging';
+    if (dragOverKey === key && dragKey && dragKey !== key) c += ' droptarget';
+    return c;
+  };
+
+  // Leave Arrange mode automatically when the cockpit is gone or only one panel
+  // remains (nothing to reorder).
+  useEffect(() => {
+    if (editLayout && visiblePanels.length < 2) setEditLayout(false);
+  }, [editLayout, visiblePanels.length]);
 
   return (
     <>
@@ -1133,8 +1256,37 @@ export default function SessionPage() {
           </div>
         )}
 
-        {/* Transcript panels — shown when live or stopped */}
-        {(isLive || status === 'stopped' || status === 'error') && (
+        {/* Cockpit panels — vertical drag-to-reorder via opt-in Arrange mode */}
+        {panelVisibility.transcripts && (
+          <div className="smc-cockpit" style={styles.cockpit}>
+          {visiblePanels.length >= 2 && (
+            <div style={styles.arrangeBar}>
+              <button
+                onClick={() => setEditLayout(v => !v)}
+                style={editLayout ? styles.arrangeBtnActive : styles.arrangeBtn}
+              >
+                {editLayout ? '✓ Done arranging' : '⠿ Arrange panels'}
+              </button>
+              {editLayout && (
+                <span style={styles.arrangeHint}>Drag panels up or down to reorder. Saved on this device.</span>
+              )}
+              {editLayout && orderIsCustom && (
+                <button onClick={resetLayout} style={styles.arrangeReset}>Reset order</button>
+              )}
+            </div>
+          )}
+          <div
+            className={panelBlockClass('transcripts')}
+            style={panelBlockStyle('transcripts')}
+            draggable={editLayout}
+            onDragStart={editLayout ? (e) => onPanelDragStart('transcripts', e) : undefined}
+            onDragOver={editLayout ? (e) => onPanelDragOver('transcripts', e) : undefined}
+            onDrop={editLayout ? (e) => onPanelDrop('transcripts', e) : undefined}
+            onDragEnd={editLayout ? onPanelDragEnd : undefined}
+          >
+            {editLayout && (
+              <div style={styles.dragBadge}><span style={styles.dragGrip}>⠿</span> {PANEL_LABELS.transcripts}</div>
+            )}
           <div className="smc-grid" style={styles.grid}>
             {/* ME panel */}
             <div className="smc-transcript-panel me-panel">
@@ -1213,10 +1365,22 @@ export default function SessionPage() {
               </div>
             </div>
           </div>
-        )}
+          </div>
 
         {/* Coaching panel */}
-        {(isLive || status === 'stopped') && (
+        {panelVisibility.coaching && (
+          <div
+            className={panelBlockClass('coaching')}
+            style={panelBlockStyle('coaching')}
+            draggable={editLayout}
+            onDragStart={editLayout ? (e) => onPanelDragStart('coaching', e) : undefined}
+            onDragOver={editLayout ? (e) => onPanelDragOver('coaching', e) : undefined}
+            onDrop={editLayout ? (e) => onPanelDrop('coaching', e) : undefined}
+            onDragEnd={editLayout ? onPanelDragEnd : undefined}
+          >
+            {editLayout && (
+              <div style={styles.dragBadge}><span style={styles.dragGrip}>⠿</span> {PANEL_LABELS.coaching}</div>
+            )}
           <div className="smc-coach-panel">
             <div style={styles.coachHeader}>
               <span style={styles.coachTitle}>Coaching</span>
@@ -1280,10 +1444,23 @@ export default function SessionPage() {
               </div>
             )}
           </div>
+          </div>
         )}
 
         {/* Assist panel */}
-        {(isLive || status === 'stopped') && (
+        {panelVisibility.assist && (
+          <div
+            className={panelBlockClass('assist')}
+            style={panelBlockStyle('assist')}
+            draggable={editLayout}
+            onDragStart={editLayout ? (e) => onPanelDragStart('assist', e) : undefined}
+            onDragOver={editLayout ? (e) => onPanelDragOver('assist', e) : undefined}
+            onDrop={editLayout ? (e) => onPanelDrop('assist', e) : undefined}
+            onDragEnd={editLayout ? onPanelDragEnd : undefined}
+          >
+            {editLayout && (
+              <div style={styles.dragBadge}><span style={styles.dragGrip}>⠿</span> {PANEL_LABELS.assist}</div>
+            )}
           <div className="smc-assist-panel">
             <div style={styles.assistHeader}>
               <span style={styles.assistTitle}>Live Assist</span>
@@ -1356,10 +1533,23 @@ export default function SessionPage() {
               </div>
             )}
           </div>
+          </div>
         )}
 
         {/* Follow-up Tracker */}
-        {showFollowUp && (
+        {panelVisibility.followup && (
+          <div
+            className={panelBlockClass('followup')}
+            style={panelBlockStyle('followup')}
+            draggable={editLayout}
+            onDragStart={editLayout ? (e) => onPanelDragStart('followup', e) : undefined}
+            onDragOver={editLayout ? (e) => onPanelDragOver('followup', e) : undefined}
+            onDrop={editLayout ? (e) => onPanelDrop('followup', e) : undefined}
+            onDragEnd={editLayout ? onPanelDragEnd : undefined}
+          >
+            {editLayout && (
+              <div style={styles.dragBadge}><span style={styles.dragGrip}>⠿</span> {PANEL_LABELS.followup}</div>
+            )}
           <div className="smc-followup-outer">
             <div style={styles.followUpHeader}>
               <span style={styles.followUpTitle}>Follow-up Tracker</span>
@@ -1458,6 +1648,9 @@ export default function SessionPage() {
               </div>
             </div>
           </div>
+          </div>
+        )}
+          </div>
         )}
 
         <div style={styles.foot}>
@@ -1512,6 +1705,15 @@ const styles = {
   docName: { fontSize: 12, color: 'var(--tx)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   docSize: { fontSize: 10, color: 'var(--tx-3)', flexShrink: 0 },
   docRemove: { background: 'none', border: 'none', color: 'var(--tx-3)', cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: '0 2px', flexShrink: 0 },
+  // Cockpit panel reorder (Arrange mode)
+  cockpit: { display: 'flex', flexDirection: 'column', gap: 14, flex: 1, minHeight: 0 },
+  arrangeBar: { display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' },
+  arrangeBtn: { border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg-raised)', color: 'var(--tx-2)', padding: '5px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' },
+  arrangeBtnActive: { border: '1px solid var(--accent)', borderRadius: 8, background: 'var(--accent-dim)', color: 'var(--accent-hi)', padding: '5px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' },
+  arrangeHint: { fontSize: 11, color: 'var(--tx-3)' },
+  arrangeReset: { border: '1px solid var(--border)', borderRadius: 8, background: 'transparent', color: 'var(--tx-3)', padding: '5px 10px', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' },
+  dragBadge: { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', marginBottom: 8, fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--accent-hi)', background: 'var(--accent-dim)', border: '1px dashed var(--accent)', borderRadius: 8, cursor: 'grab', userSelect: 'none' },
+  dragGrip: { fontSize: 14, lineHeight: 1 },
   // Transcript grid (panels use className="smc-transcript-panel me-panel/others-panel")
   grid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, flex: 1 },
   panel: { background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: 12, padding: 14, display: 'flex', flexDirection: 'column', minHeight: 300 },

@@ -901,6 +901,24 @@ body::before {
 .smc-coach-panel, .smc-followup-outer { resize: vertical; overflow: auto; min-height: 140px; }
 
 /* ==========================================================
+   COCKPIT PANEL REORDER — opt-in "Arrange" (jiggle) mode
+   ========================================================== */
+.smc-panel-block { position: relative; }
+.smc-panel-block.editing { cursor: grab; animation: smc-jiggle 0.45s ease-in-out infinite; transform-origin: 50% 50%; }
+.smc-panel-block.editing:nth-of-type(even) { animation-delay: -0.22s; }
+.smc-panel-block.editing:active { cursor: grabbing; }
+.smc-panel-block.dragging { opacity: 0.45; animation: none; }
+.smc-panel-block.droptarget { outline: 2px dashed var(--accent); outline-offset: 4px; border-radius: var(--r-md); animation: none; }
+@keyframes smc-jiggle {
+  0%   { transform: rotate(-0.45deg); }
+  50%  { transform: rotate(0.45deg); }
+  100% { transform: rotate(-0.45deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .smc-panel-block.editing { animation: none; }
+}
+
+/* ==========================================================
    THEME SKIN v4 — LIFE + DEPTH (overrides v3)
    Visible motion (drifting backdrop + slow panel sheen) and
    real depth (gradient fills, layered shadow, edge-light).
