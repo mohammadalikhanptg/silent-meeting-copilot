@@ -49,7 +49,7 @@ export async function GET(request, { params }) {
   try {
     const res = await fetch(`${ENGINE_URL}/interview-assessment`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.INTERNAL_SHARED_SECRET || process.env.HELPER_SIGNING_SECRET || ''}` },
       body: JSON.stringify({
         me, others, title: meeting.title || 'Interview', date,
         objective: meeting.objective || '', contextNotes: meeting.context_notes || '',

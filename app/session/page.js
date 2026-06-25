@@ -177,7 +177,7 @@ export default function SessionPage() {
       try {
         const res = await fetch(`${ENGINE_URL}/coach`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokenRef.current || ''}` },
           body: JSON.stringify({
             me,
             others,
