@@ -50,3 +50,21 @@ Format: start with Markdown (mirrors Action Points), consider PDF later.
 
 ## Cross-review ask
 Validate the safeguards, the verdict framing/model choice, the fairness and UK legal posture, and the evidence-pack structure against recruitment-industry standards before build.
+
+## Cross-review reconciliation (v2, 24 Jun) — Codex verdict: APPROVE-WITH-CHANGES
+Adopted before building the evidence review:
+- No suitability/honesty headline and no green/red/amber label in v1. Output is a per-claim evidence/consistency table plus competency coverage (what was covered, not a quality rating); any summary is generated only from that table.
+- Reframe from "verdict / genuine-vs-fake" to a claim-and-evidence review. Forbidden output and endpoint names: verdict, pass, fail, hire, risk, genuine, fake, trust, honesty, integrity, recommendation. Endpoint becomes /interview-evidence (or /interview-review-pack).
+- Structured pipeline: extract explicit claims (candidate statements plus explicit CV/reference statements only, no inferred claims) then match to citations then classify narrow consistency states then competency coverage then a constrained summary.
+- Strict citation schema: every row cites quoted transcript span(s) and quoted reference span(s) with IDs and a grounding status; uncited rows are excluded or marked "uncited draft, exclude".
+- Consistency labels: supported by available evidence; partially supported; not addressed in interview; in tension with reference material; insufficient evidence. Reserve "inconsistent" for cited direct contradictions only.
+- Fairness: explicitly exclude protected and proxy characteristics (accent, fluency unless role-required, age, names, nationality/immigration, family/pregnancy, disability, health, religion, ethnicity, gender) and instruct the model to ignore them if present unless a user-supplied role criterion legally requires otherwise.
+- UK legal: require a human-review acknowledgement before export/use; decision-support copy in the UI, the export header, and the footer; lawful-basis wording (not consent-first); note DPIA, retention, access control, and candidate-rights handling as out-of-feature requirements.
+- Provenance in the pack: generation timestamp, engine/model version, session id, input provenance (candidate vs employer supplied, all reference docs listed), and a speaker-attribution caveat.
+- Inputs: handle multiple reference documents and distinguish candidate-supplied material from employer-supplied criteria.
+- Adversarial test cases required before release (protected-characteristic mentions, absent CV evidence, hallucinated company names, diarization/misattribution errors, sarcasm, date conflicts).
+- Live-mode coaching labels made mode-aware now (done): interview shows "Claims to verify" and "Suggested questions".
+
+Operator decision (flagged): the originally described green/red genuine-vs-fake verdict is intentionally NOT being built as a suitability or honesty label. It is replaced by the citation-backed claim-and-competency evidence review above, which serves the same goal (whether the candidate's claims hold up against their CV and the role) while being legally and ethically defensible for recruitment. If a single headline indicator is wanted later, it should summarise evidence completeness, not candidate quality, and only after legal and UX validation.
+
+Full Codex review: docs/interview-mode-codex-review-20260624.md.

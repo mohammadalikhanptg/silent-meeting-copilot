@@ -816,6 +816,11 @@ export default function SessionPage() {
   const isConnecting = status === 'connecting';
   const isPaused = status === 'paused' || paused;
   const showDeafWarning = isLive && helperConnected === false;
+  const coachLabels = (
+    modeType === 'interview' ? { open: 'Claims to verify', sugg: 'Suggested questions' }
+    : modeType === 'customer_service' ? { open: 'Open customer issues', sugg: 'Suggested next steps' }
+    : { open: 'Open items from others', sugg: 'Suggested responses' }
+  );
   const deepgramBlocked = mode === 'hindi-urdu' && deepgramAvailable === false;
   const canStart = !isLive && !isConnecting && !isPaused && !deepgramBlocked;
   const correctionCount = coaching?.corrections?.length ?? 0;
@@ -1197,7 +1202,7 @@ export default function SessionPage() {
                 )}
                 {coaching.openItems?.length > 0 && (
                   <div style={styles.coachSection}>
-                    <div style={styles.coachSectionLabel}>Open items from others</div>
+                    <div style={styles.coachSectionLabel}>{coachLabels.open}</div>
                     <ul style={styles.coachList}>
                       {coaching.openItems.map((item, i) => <li key={i} style={styles.coachItem}>{item}</li>)}
                     </ul>
@@ -1205,13 +1210,13 @@ export default function SessionPage() {
                 )}
                 {coaching.openItems?.length === 0 && (
                   <div style={styles.coachSection}>
-                    <div style={styles.coachSectionLabel}>Open items from others</div>
+                    <div style={styles.coachSectionLabel}>{coachLabels.open}</div>
                     <div style={styles.coachNone}>None detected</div>
                   </div>
                 )}
                 {coaching.suggestions?.length > 0 && (
                   <div style={styles.coachSection}>
-                    <div style={styles.coachSectionLabel}>Suggested responses</div>
+                    <div style={styles.coachSectionLabel}>{coachLabels.sugg}</div>
                     <ul style={styles.coachList}>
                       {coaching.suggestions.map((s, i) => (
                         <li key={i} style={{ ...styles.coachItem, color: '#fde68a' }}>{s}</li>
