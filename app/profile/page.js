@@ -1,21 +1,38 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import ThemeToggle from '../components/ThemeToggle';
 
-const GUIDE_PROMPT = `I need your help writing an "about me" document I can paste into an AI meeting copilot as my always-on coaching context.
+function buildGuidePrompt(known = {}) {
+  const { businesses = [], bio = '', emails = [], socialLinks = [], commonItems = [] } = known;
+  const facts = [];
+  for (const b of businesses) {
+    if (b && b.name) {
+      const bits = [b.website, b.industry].filter(Boolean).join(', ');
+      facts.push(`Company: ${b.name}${bits ? ` (${bits})` : ''}`);
+    }
+  }
+  for (const e of emails) { if (e && e.value) facts.push(`${e.label || 'Email'}: ${e.value}`); }
+  for (const sl of socialLinks) { if (sl && (sl.value || sl.url)) facts.push(`${sl.label || 'Link'}: ${sl.value || sl.url}`); }
+  for (const c of commonItems) { if (c && c.label && c.value) facts.push(`${c.label}: ${c.value}`); }
+  if (bio && bio.trim()) facts.push(`Short bio: ${bio.trim()}`);
 
-Please ask me about each of the following one section at a time, then produce a clean Markdown document with all my answers:
+  const sections = [];
+  sections.push('**Who I am** - my name, job title, and seniority');
+  if (businesses.length === 0) sections.push('**My company / companies** - what they do, size, industry, and website');
+  sections.push('**My expertise** - key skills, technical areas, and knowledge domains');
+  sections.push('**Communication style** - how I present myself in meetings (concise vs detail-heavy, formal vs conversational)');
+  sections.push('**Typical meetings** - the kinds of meetings I run or attend (sales calls, client reviews, technical deep-dives, board updates)');
+  sections.push('**My goals in meetings** - what I am usually trying to achieve (close a deal, get alignment, gather information, build trust)');
+  sections.push('**How I like to be coached** - what real-time guidance is most useful (flag open questions, suggest follow-ups, prompt me to share specific info)');
+  const numbered = sections.map((sec, i) => `${i + 1}. ${sec}`).join('\n');
 
-1. **Who I am** — my name, job title, and seniority
-2. **My company / companies** — what they do, size, industry, and website
-3. **My expertise** — key skills, technical areas, and knowledge domains
-4. **Communication style** — how I typically present myself in meetings (concise vs detail-heavy, formal vs conversational, etc.)
-5. **Typical meetings** — the kinds of meetings I usually run or attend (sales calls, client reviews, technical deep-dives, board updates, etc.)
-6. **My goals in meetings** — what I'm usually trying to achieve (close a deal, get alignment, gather information, build trust, etc.)
-7. **How I like to be coached** — what kind of real-time guidance is most useful to me (flag open questions, suggest follow-ups, prompt me to share specific info, etc.)
+  const knownBlock = facts.length
+    ? `Here is what is already on file. Do not ask me about any of these again, and use them directly in the document:\n${facts.map(f => `- ${f}`).join('\n')}\n\n`
+    : '';
 
-Once you have all my answers, produce a clean Markdown document I can paste directly into my profile.`;
+  return `I need your help writing an "about me" document I can paste into an AI meeting copilot as my always-on coaching context.\n\n${knownBlock}Ask me one at a time about only the topics below that are not already covered above. If a topic is already clear from what is on file, skip it and do not ask.\n\n${numbered}\n\nWhen you have my answers, produce a clean Markdown document that combines what is already on file with my answers, ready to paste directly into my profile.`;
+}
 
 function detectOS() {
   if (typeof navigator === 'undefined') return 'unknown';
@@ -92,6 +109,11 @@ export default function ProfilePage() {
       .finally(() => setLoading(false));
   }, []);
 
+  const guidePrompt = useMemo(
+    () => buildGuidePrompt({ businesses, bio, emails, socialLinks, commonItems }),
+    [businesses, bio, emails, socialLinks, commonItems]
+  );
+
   const save = async () => {
     setSaving(true);
     setError('');
@@ -124,7 +146,7 @@ export default function ProfilePage() {
 
   // P2: Guide prompt copy
   const copyGuide = () => {
-    navigator.clipboard.writeText(GUIDE_PROMPT).then(() => {
+    navigator.clipboard.writeText(guidePrompt).then(() => {
       setGuideCopied(true);
       setTimeout(() => setGuideCopied(false), 2000);
     });
@@ -314,7 +336,7 @@ export default function ProfilePage() {
                 Copy the prompt below, paste it into ChatGPT or Claude, and answer the questions.
                 Then paste the generated Markdown into the text box or upload it as a file.
               </p>
-              <pre style={styles.guidePre}>{GUIDE_PROMPT}</pre>
+              <pre style={styles.guidePre}>{guidePrompt}</pre>
               <button
                 style={{ ...styles.copyBtn, background: guideCopied ? '#14532d' : '#1a2a3a', borderColor: guideCopied ? '#22c55e' : '#1e3a5f', color: guideCopied ? '#22c55e' : '#93c5fd' }}
                 onClick={copyGuide}
