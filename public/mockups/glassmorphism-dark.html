@@ -1,4 +1,4 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SMC mockup — Claymorphism (light)</title><style>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SMC mockup — Glassmorphism (dark)</title><style>
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{min-height:100%}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;padding:30px;line-height:1.55;letter-spacing:-.01em;min-height:100vh}
@@ -39,28 +39,25 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Ar
 .theme-name{max-width:1100px;margin:0 auto 18px;font-size:12px;font-weight:600;opacity:.55;letter-spacing:.05em;position:relative;z-index:1;text-transform:uppercase}
 @media(max-width:840px){.grid{grid-template-columns:1fr}body{padding:16px}}
 
-@keyframes claydrift{0%{transform:translate(0,0)}50%{transform:translate(3%,4%)}100%{transform:translate(0,0)}}
-body{background:#eceef5;color:#3f4660}
-body::before{content:"";position:fixed;inset:-12%;z-index:0;background:radial-gradient(40% 40% at 22% 28%,rgba(120,140,255,.16),transparent 70%),radial-gradient(38% 38% at 80% 72%,rgba(255,170,140,.14),transparent 70%);animation:claydrift 26s ease-in-out infinite;pointer-events:none}
-.topbar,.controls{background:#f6f7fc;box-shadow:10px 10px 24px rgba(120,130,170,.18),-8px -8px 20px rgba(255,255,255,.9),inset 1px 1px 1px rgba(255,255,255,.6)}
-.brand{color:#2f3550}.logo{color:#5b6cff}
-.chip,.ctrl-pill{background:#eef0f8;box-shadow:inset 2px 2px 5px rgba(120,130,170,.16),inset -2px -2px 5px rgba(255,255,255,.95);color:#5560a0;font-weight:600}
-.chip.lang{color:#3a8f7a}
-.status{color:#6a7290}.dot{background:#2fcb8e;box-shadow:0 0 0 4px rgba(47,203,142,.18)}
-.panel{background:#f6f7fc;box-shadow:14px 14px 32px rgba(120,130,170,.2),-10px -10px 26px rgba(255,255,255,.9),inset 1px 1px 2px rgba(255,255,255,.7)}
-.panel-head,.coach-label{color:#8b93b5}
-.turn.others{background:#eef0f8;box-shadow:5px 5px 14px rgba(120,130,170,.16),-4px -4px 12px rgba(255,255,255,.85);color:#3f4660}
-.turn.me{background:linear-gradient(135deg,#5b6cff,#7c5cff);color:#fff;box-shadow:6px 6px 16px rgba(91,108,255,.35),inset 1px 1px 2px rgba(255,255,255,.3)}
-.turn.me .who{opacity:.85}
-.coach-card{background:#eef0f8;box-shadow:inset 3px 3px 8px rgba(120,130,170,.14),inset -3px -3px 8px rgba(255,255,255,.95)}
-.coach-card.align{background:linear-gradient(135deg,#e8f1ff,#eef0f8)}
-.bar{background:#e3e6f2;box-shadow:inset 2px 2px 5px rgba(120,130,170,.25)}
-.me-fill{background:linear-gradient(90deg,#5b6cff,#7c5cff)}
-.btn.stop{background:linear-gradient(135deg,#ff7a8a,#ff5d73);color:#fff;box-shadow:8px 8px 18px rgba(255,93,115,.35),inset 1px 1px 2px rgba(255,255,255,.4)}
-.btn.stop:active{transform:translateY(2px);box-shadow:4px 4px 10px rgba(255,93,115,.3)}
-.next{color:#6a7290}
+@keyframes aurora{0%{transform:translate(0,0) scale(1)}50%{transform:translate(6%,-4%) scale(1.12)}100%{transform:translate(0,0) scale(1)}}
+body{background:#0a0c12;color:#e9ecf4;overflow-x:hidden}
+body::before{content:"";position:fixed;inset:-20%;z-index:0;background:radial-gradient(34% 34% at 25% 30%,rgba(90,110,255,.30),transparent 70%),radial-gradient(30% 30% at 78% 68%,rgba(40,200,200,.22),transparent 70%),radial-gradient(28% 28% at 60% 18%,rgba(180,80,255,.18),transparent 70%);filter:blur(10px);animation:aurora 30s ease-in-out infinite;pointer-events:none}
+.topbar,.panel,.controls{background:rgba(255,255,255,.055);backdrop-filter:blur(20px) saturate(140%);-webkit-backdrop-filter:blur(20px) saturate(140%);border:1px solid rgba(255,255,255,.12);box-shadow:0 10px 40px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.08)}
+.brand,.status,.next{color:#f3f5fb}.logo{color:#8ea2ff}
+.chip,.ctrl-pill{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);color:#cfd6e8;font-weight:600}
+.chip.lang{color:#7df0d0;border-color:rgba(125,240,208,.3)}
+.dot{background:#43e8a0;box-shadow:0 0 12px #43e8a0}.helper{color:rgba(233,236,244,.7)}
+.panel-head,.coach-label{color:rgba(233,236,244,.6)}
+.turn.others{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);color:#e9ecf4}
+.turn.me{background:linear-gradient(135deg,rgba(120,140,255,.34),rgba(120,140,255,.16));border:1px solid rgba(150,170,255,.35);color:#fff}
+.turn p,.coach-card p,.coach-card li{color:#dfe4f0}
+.coach-card{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09)}
+.coach-card.align{background:linear-gradient(135deg,rgba(90,110,255,.12),rgba(255,255,255,.03))}
+.bar{background:rgba(255,255,255,.1)}.me-fill{background:linear-gradient(90deg,#8ea2ff,#5ad6c8);box-shadow:0 0 12px rgba(140,170,255,.5)}
+.btn.stop{background:linear-gradient(135deg,rgba(255,100,120,.5),rgba(255,70,90,.32));border:1px solid rgba(255,160,170,.4);color:#fff}
+.btn.stop:active{transform:translateY(1px)}
 
-</style></head><body><div class="theme-name">Silent Meeting Copilot · Claymorphism (light)</div>
+</style></head><body><div class="theme-name">Silent Meeting Copilot · Glassmorphism (dark)</div>
 <div class="app">
   <header class="topbar">
     <div class="brand"><span class="logo">◐</span><span>Silent Meeting Copilot</span></div>

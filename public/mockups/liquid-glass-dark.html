@@ -1,4 +1,4 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SMC mockup — Claymorphism (light)</title><style>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SMC mockup — Liquid Glass (dark)</title><style>
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{min-height:100%}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;padding:30px;line-height:1.55;letter-spacing:-.01em;min-height:100vh}
@@ -39,28 +39,26 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Ar
 .theme-name{max-width:1100px;margin:0 auto 18px;font-size:12px;font-weight:600;opacity:.55;letter-spacing:.05em;position:relative;z-index:1;text-transform:uppercase}
 @media(max-width:840px){.grid{grid-template-columns:1fr}body{padding:16px}}
 
-@keyframes claydrift{0%{transform:translate(0,0)}50%{transform:translate(3%,4%)}100%{transform:translate(0,0)}}
-body{background:#eceef5;color:#3f4660}
-body::before{content:"";position:fixed;inset:-12%;z-index:0;background:radial-gradient(40% 40% at 22% 28%,rgba(120,140,255,.16),transparent 70%),radial-gradient(38% 38% at 80% 72%,rgba(255,170,140,.14),transparent 70%);animation:claydrift 26s ease-in-out infinite;pointer-events:none}
-.topbar,.controls{background:#f6f7fc;box-shadow:10px 10px 24px rgba(120,130,170,.18),-8px -8px 20px rgba(255,255,255,.9),inset 1px 1px 1px rgba(255,255,255,.6)}
-.brand{color:#2f3550}.logo{color:#5b6cff}
-.chip,.ctrl-pill{background:#eef0f8;box-shadow:inset 2px 2px 5px rgba(120,130,170,.16),inset -2px -2px 5px rgba(255,255,255,.95);color:#5560a0;font-weight:600}
-.chip.lang{color:#3a8f7a}
-.status{color:#6a7290}.dot{background:#2fcb8e;box-shadow:0 0 0 4px rgba(47,203,142,.18)}
-.panel{background:#f6f7fc;box-shadow:14px 14px 32px rgba(120,130,170,.2),-10px -10px 26px rgba(255,255,255,.9),inset 1px 1px 2px rgba(255,255,255,.7)}
-.panel-head,.coach-label{color:#8b93b5}
-.turn.others{background:#eef0f8;box-shadow:5px 5px 14px rgba(120,130,170,.16),-4px -4px 12px rgba(255,255,255,.85);color:#3f4660}
-.turn.me{background:linear-gradient(135deg,#5b6cff,#7c5cff);color:#fff;box-shadow:6px 6px 16px rgba(91,108,255,.35),inset 1px 1px 2px rgba(255,255,255,.3)}
-.turn.me .who{opacity:.85}
-.coach-card{background:#eef0f8;box-shadow:inset 3px 3px 8px rgba(120,130,170,.14),inset -3px -3px 8px rgba(255,255,255,.95)}
-.coach-card.align{background:linear-gradient(135deg,#e8f1ff,#eef0f8)}
-.bar{background:#e3e6f2;box-shadow:inset 2px 2px 5px rgba(120,130,170,.25)}
-.me-fill{background:linear-gradient(90deg,#5b6cff,#7c5cff)}
-.btn.stop{background:linear-gradient(135deg,#ff7a8a,#ff5d73);color:#fff;box-shadow:8px 8px 18px rgba(255,93,115,.35),inset 1px 1px 2px rgba(255,255,255,.4)}
-.btn.stop:active{transform:translateY(2px);box-shadow:4px 4px 10px rgba(255,93,115,.3)}
-.next{color:#6a7290}
+@keyframes lqflow{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
+@keyframes lqsheen{0%{transform:translateX(-130%)}100%{transform:translateX(240%)}}
+body{background:linear-gradient(125deg,#0b1020,#161033 45%,#07131f);background-size:300% 300%;animation:lqflow 28s ease infinite;color:#eef1fb;overflow-x:hidden}
+.topbar,.panel,.controls{position:relative;overflow:hidden;background:linear-gradient(160deg,rgba(255,255,255,.14),rgba(255,255,255,.03));backdrop-filter:blur(22px) saturate(150%);-webkit-backdrop-filter:blur(22px) saturate(150%);border:1px solid rgba(255,255,255,.18);box-shadow:0 16px 44px rgba(0,0,0,.5),inset 0 1px 1px rgba(255,255,255,.4),inset 0 -12px 26px rgba(120,140,255,.06)}
+.topbar::before,.panel::before,.controls::before{content:"";position:absolute;top:0;left:0;width:45%;height:100%;background:linear-gradient(105deg,transparent,rgba(255,255,255,.10),transparent);animation:lqsheen 11s ease-in-out infinite;pointer-events:none;z-index:0}
+.topbar::after,.panel::after,.controls::after{content:"";position:absolute;top:0;left:0;right:0;height:38%;background:linear-gradient(rgba(255,255,255,.16),transparent);pointer-events:none;border-radius:20px 20px 50% 50%;z-index:0}
+.brand,.status,.next{color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.3);position:relative;z-index:1}.logo{color:#aeb9ff}
+.session-meta{position:relative;z-index:1}
+.chip,.ctrl-pill{position:relative;z-index:1;background:linear-gradient(rgba(255,255,255,.18),rgba(255,255,255,.05));border:1px solid rgba(255,255,255,.28);color:#eef1fb;font-weight:600}
+.dot{background:#6affd0;box-shadow:0 0 12px #6affd0}.helper{color:rgba(238,241,251,.78)}
+.panel-head,.coach-label{color:rgba(238,241,251,.72);position:relative;z-index:1}
+.turns,.coach{position:relative;z-index:1}
+.turn.others{background:linear-gradient(160deg,rgba(255,255,255,.12),rgba(255,255,255,.03));border:1px solid rgba(255,255,255,.18);color:#fff}
+.turn.me{background:linear-gradient(160deg,rgba(140,150,255,.42),rgba(120,120,255,.16));border:1px solid rgba(190,200,255,.45);color:#fff;box-shadow:inset 0 1px 1px rgba(255,255,255,.4)}
+.turn p,.coach-card p,.coach-card li{color:#eef1fb}
+.coach-card{background:linear-gradient(160deg,rgba(255,255,255,.10),rgba(255,255,255,.02));border:1px solid rgba(255,255,255,.15)}
+.bar{background:rgba(255,255,255,.14)}.me-fill{background:linear-gradient(90deg,#aeb9ff,#6affd0);box-shadow:0 0 14px rgba(150,180,255,.6)}
+.btn.stop{position:relative;z-index:1;background:linear-gradient(160deg,rgba(255,120,140,.55),rgba(255,80,100,.3));border:1px solid rgba(255,190,200,.5);color:#fff;box-shadow:inset 0 1px 1px rgba(255,255,255,.5),0 8px 22px rgba(0,0,0,.3)}
 
-</style></head><body><div class="theme-name">Silent Meeting Copilot · Claymorphism (light)</div>
+</style></head><body><div class="theme-name">Silent Meeting Copilot · Liquid Glass (dark)</div>
 <div class="app">
   <header class="topbar">
     <div class="brand"><span class="logo">◐</span><span>Silent Meeting Copilot</span></div>
