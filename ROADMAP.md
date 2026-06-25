@@ -233,3 +233,46 @@ v1 IS READY FOR FIRST PREVIEW AND TESTING. Complete: remote-control core (engine
 
 ### Meeting finalisation before first test (25 Jun)
 Per-user default meeting language added to profile settings (English default, plus Hindi/Urdu and Auto). New meetings start in the user's chosen default; the per-meeting language dropdown still overrides before Start; the selector is locked once live. Mid-session language switching intentionally left out (engine supports it; not exposed in the cockpit) pending a real need. Dead-code cleanup: removed the obsolete "Deepgram API key" gate from the cockpit (state, /health probe, start gate, disabled-button branch, warnings, error handler) and the unreachable deepgram_unavailable broadcast from the engine, since nova-3 runs keyless on Cloudflare Workers AI. Engine a4b4254e, app build READY (c918ced). Meeting loop is now ready for first real-audio test.
+
+---
+
+## Status update — 25 Jun 2026 (supersedes the Section 4 build-status snapshot)
+
+### Done, committed and deployed (live on main)
+- Remote-control core (Waves 1-4): engine secret split; Durable Object safety controls and fail-closed auth; helper daemon rewrite (auto-connect standby, capture on command, four states, mic hot-swap, heartbeat, backoff reconnect, silence gating); token-based cockpit WebSocket.
+- Outputs: live minutes, downloadable action points, minutes DOCX.
+- Modes framework (m1): meeting / interview / customer_service; session type selector and review display.
+- Interview vertical (m2/m5): mode-aware coaching plus a post-session cited assessment (per-claim evidence table, competency coverage, deterministic green/orange/red/none signal computed in code, fairness exclusions, disclaimer).
+- Meeting finalisation: per-user default meeting language; keyless transcription (Whisper for English, Deepgram nova-3 for Hindi/Urdu with diarization); dead-code cleanup.
+- Security baseline: criticals closed (legacy unauthenticated WebSocket/info routes removed, DO fails closed); POST-endpoint auth; CORS locked to app origin; request-body size cap; security headers; transcript broadcasts scoped to browsers; coach prompt-injection isolation. Independent Codex cross-review applied.
+- Design system: two themes via token layer with a persisted toggle — dark Liquid Glass, light Claymorphism — with living animated backgrounds and panel depth; Glassmorphism candidate discarded.
+- Feedback pass 1: readable/larger coaching; flags visible in both themes, click to toggle off, tracker remove (DELETE route); transcript boxes scroll and drag-resize height; redundant single-speaker label removed; collapsible session-prep.
+- Feedback pass 2: motion made actually visible (reduced-motion guard removed, drift/sheen boosted); session-prep hidden during a live session; flagged line changes colour and highlights instantly; pre-start helper-readiness monitor and readiness dot/text.
+- Documentation: docs/FRAMEWORK.md refreshed; docs/security-framework.md current; this roadmap.
+
+### Left to commit
+Nothing. Working tree is clean; every change above is pushed to main and deployed.
+
+### Backlog / ideas not yet implemented (priority order)
+UX / cockpit:
+1. Paragraph-level timestamps — group a continuous run of speech under one timestamp, start a new paragraph on a pause, with a guardrail break for very long unbroken runs. Replaces the current per-phrase timestamps; directly improves flagging granularity. (Operator has raised this twice.)
+2. Make the Follow-up Tracker genuinely functional — talking points and references currently produce nothing useful; investigate the flag->enrich pipeline (likely missing SEARCH_API_KEY or wiring) and redesign for real value.
+3. Full dashboard layout control — drag-to-reorder "jiggle" mode with saved positions (height-resize already shipped; reorder + persistence outstanding). Width stays fixed.
+4. References / live-lookup section purposeful redesign — clarify its job and make it earn its place.
+5. Profile "generate about me" prompt retailor — include what is already known and only ask for missing fields, instead of asking everything.
+6. Profile dictation microphone — operator leaned against it (transcription-error risk); not building unless requested.
+
+Functional / wiring:
+7. Helper-to-session association before Start (engine side) — confirm whether the helper joins the session before Start; if not, wire it so pre-start readiness is fully real. Verify on operator test.
+8. Code-sign the Windows installer to remove the SmartScreen warning.
+
+Security hardening (gated before any real third-party/candidate data):
+9. H2 move helper key and engine token out of the URL query into a header/subprotocol (needs helper rebuild + reinstall).
+10. H3 drop the signing-secret fallback after confirming the dedicated secret in both environments; add a key id for staged rotation.
+11. H4 bind the engine token to the session id with revocation and replay protection.
+12. Strict Content-Security-Policy; data retention and hard-delete; automated IDOR test; AI-provider data-processing confirmation; CI dependency and secret scanning; rotate the git-embedded credential.
+
+Future / Phase 2:
+13. Speaker-labelled note-taker output as a paid option so a customer does not need a separate note-taker.
+14. Customer-service softphone auto start/stop integration.
+15. Per-industry-vertical scaling and polish, with cross-review before launch.

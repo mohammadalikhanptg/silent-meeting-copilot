@@ -1,174 +1,62 @@
-# Silent Meeting Copilot - Framework and Roadmap
+# Silent Meeting Copilot (SMC) — Framework & Architecture
 
-Owner: Mohammad Ali Khan (Pacific Technology Group)
-Status: in active build. Living document - the single source of truth for this project. Keep updated as work progresses.
-Last updated: 2026-06-22
-
-This document exists so that if a chat ends, the next chat (or person) can resume with zero data loss.
+Authoritative engineering reference. Last refreshed 25 Jun 2026. Companion documents: ROADMAP.md (single source of truth for status and backlog), docs/security-framework.md (security posture + remediation), docs/interview-mode-design.md (interview vertical). Owner: Mohammad Ali Khan (Pacific Technology Group). Repo commit author is always ali@khan.vg.
 
 ## 1. What it is
-A tool that silently assists the user during live conversations (disputes, negotiations, supplier
-calls, difficult business conversations, and customer-support style calls). It never speaks. It
-listens to both sides, shows on-screen text guidance, and helps the user respond well and stay on
-their own strategy. Born from a one-off family/business dispute meeting, but built as a durable,
-commercialisable product, not for a single meeting.
+A live meeting copilot for a single operator, expanding to friends and family, not enterprise. A Windows desktop helper captures two audio streams, the operator's microphone (ME) and the system loopback (OTHERS), and streams them to a cloud engine that transcribes in near real time, cleans the text, and drives live coaching while the meeting is happening. A browser page is the live cockpit. The differentiator is real-time, operator-side coaching during the meeting, which note-takers (Fireflies, Otter, Read.ai) do not do.
 
-## 2. Core principles
-- Fair, lawful use only. Not a covert "cheating" tool. Marketing never uses "undetectable".
-- Privacy-first / local-first leanings. Audio is captured locally and processed in the user's own
-  cloud account.
-- Any business or multi-party use ships with an audible "this call is recorded and AI-assisted" notice.
-- Honest by design: never coach on misheard content as if certain; flag uncertainty.
+## 2. Architecture
+- Windows Electron helper: mic = ME, WASAPI loopback = OTHERS. Auto-connects to the engine on launch and sits in standby; captures only on engine command; four states (disconnected, standby, capturing, demoted); mic hot-swap, heartbeat, exponential-backoff reconnect, client-side silence gating.
+- Cloudflare Worker engine "smc-engine": a WebSocket session backed by a Durable Object (SessionDO), plus stateless POST endpoints for generation. Two stages per audio segment: speech-to-text then an LLM cleanup/coaching pass, both on Workers AI. Input is source- and channel-labelled, so any feed source plugs into the same coach.
+- Next.js app on Vercel: magic-link + TOTP auth, the live cockpit, the meetings review pages, profile and admin.
+- Neon Postgres: all persistent state.
 
-## 3. Architecture (three parts)
-1. Helper (desktop): a small Electron app on the user's machine. Captures the microphone (ME) and the
-   system speaker output (OTHERS) as two separate streams. Resamples to 16 kHz mono. Streams both
-   outbound to the engine over a secure WebSocket. Pairs to the web login, reports its version,
-   auto-updates, shows a green connected status. It has no real UI of its own beyond device pick and
-   meters; it only captures and streams.
-2. Web app (hosted on Vercel): everything the user sees and logs into. The four-panel screen, account,
-   settings, context-pack management. Receives live transcripts and coaching from the engine.
-3. Engine (Cloudflare): receives audio from the helper, runs transcription and the coaching, and pushes
-   results to the web app. Helper and browser never talk directly; they meet in the Cloudflare account,
-   keyed to the logged-in user.
+## 3. Data flow
+Helper captures ME + OTHERS as discrete complete audio segments and streams them over the authenticated WebSocket to SessionDO. SessionDO transcribes + cleans each segment and broadcasts transcript lines to the browser cockpit. The cockpit polls the engine every 25s for coaching. Flagging a transcript line creates a flagged_item which is enriched on a separate slower background stream (talking point + references) so real-time is never disturbed. On stop, the review page generates minutes, action points, and (interview sessions) a cited assessment.
 
-Why device-level capture: it is provider-agnostic. Works on Zoom, Teams, Meet, a 3CX softphone, any
-VOIP, or in person, because it captures sound, not a meeting API. This is the core differentiator.
+## 4. Engine (worker/)
+- worker/src/index.js: routing, CORS (locked to the app origin), POST-endpoint auth, WebSocket upgrade for /app/ws.
+- worker/src/session-do.js: SessionDO (browser/helper socket tracking, helper election, capture control, broadcast) plus the transcription and generator functions.
+- Transcription: mode 'english' uses Cloudflare Whisper (free, keyless, no diarization); 'hindi-urdu' and 'auto' use Cloudflare Deepgram nova-3 (keyless on Workers AI, with diarization). Speaker labels are only attached when diarization finds more than one speaker, otherwise omitted as noise.
+- Generators: generateCoaching (talk balance, open items, suggested responses, objective alignment; mode-aware; untrusted-data isolation in the prompt), generateMinutes, generateActionPoints, generateInterviewAssessment (cited per-claim evidence with a deterministic three-state signal computed in code), enrichFlaggedItem (talking point + Brave search references).
+- Auth model: short-lived browser engine token (smcs1_, ~15 min, typ/aud bound) minted by the app; versioned helper pairing key (smc1_); an internal shared secret for app-to-engine service calls. The engine validates browser tokens by calling back to the app's internal validate endpoints; the signing secret never leaves the app. POST endpoints require either the internal service secret or a valid engine token, with a request-body size cap. The DO fails closed: it rejects any WebSocket without a Worker-injected authenticated identity.
+- Deploy: cd worker && source the env, set CLOUDFLARE_API_TOKEN from the deploy token, run wrangler deploy. Engine URL https://smc-engine.ali-6b8.workers.dev.
 
-## 4. Stack decisions and rationale
-- Helper = Electron (decided 2026-06-22). Electron grants Windows system loopback audio via
-  setDisplayMediaRequestHandler with audio:'loopback', no screen-share prompt, no hacks. Keeps the whole
-  product in one language (JS/TS) with the web app. Turnkey code-signing and auto-update. Only cost is
-  install size, irrelevant here. Chosen on merits, not to keep any third-party door open.
-- NOT Recall.ai. Their Desktop SDK gives a combined stream (no separate ME/OTHERS), is weakest exactly
-  in the softphone/in-person case, routes audio through their cloud before ours, is Electron/npm only,
-  and charges per hour. We already proved cleaner two-stream capture ourselves. Revisit only if we ever
-  need maintained cross-platform (esp. Apple Silicon) capture at commercial scale. Operator decision:
-  do not use third-party capture; build our own.
-- NOT a pure browser app. Browsers cannot capture the default output device; the only route is
-  screen-share-with-audio, which is Chrome/Edge desktop only, not silent, and fails for softphones.
-- Web on Vercel; realtime engine on Cloudflare (Vercel is not built for long-lived audio streams).
-- No GPU purchase needed: the heavy lifting is in Cloudflare; the local machine only captures.
-- Windows first. Mac/Linux later (Mac capture is the genuinely hard part and is deferred).
+## 5. Web app (Next.js on Vercel)
+- Auth: passwordless magic-link plus TOTP, allowlist restricted to the operator mailboxes, HMAC-signed httpOnly session cookie with server-side revocation, CSRF origin/referer enforcement in middleware, security headers (HSTS, nosniff, X-Frame-Options DENY, Referrer-Policy, Permissions-Policy).
+- Live cockpit (app/session/page.js): preparation panel (collapsible, hidden during a live session), ME and OTHERS transcript panels (internal scroll, drag-resizable height), coaching panel, live assist, follow-up tracker. Pre-start readiness monitor opens a read-only browser connection during preparation so helper presence and Ready state show before Start.
+- Review (app/meetings/[id]/): minutes, action points, and interview assessment panels, each backed by an API route that calls the engine.
+- Profile (app/profile/): identity, default meeting language, reference docs, and an AI "about me" generator.
+- Admin (app/admin/): invites and operational views.
+- API routes of note: /api/session/start (mint engine token), /api/flagged-items (+ [itemId] PATCH/DELETE, /process), /api/meetings (+ segments, minutes, action-points, interview-assessment, minutes-docx), /api/profile, /api/internal/validate-* (engine callbacks).
 
-## 5. Capture (PROVEN 2026-06-22)
-Electron spike at helper-spike/ captured microphone and system loopback as two independent streams with
-live level meters, on ALISTUDYPC. First attempt failed because loopback was attached to a screen-video
-source and Windows Graphics Capture returned access-denied. Fix: attach loopback audio to the app's own
-window frame (callback({ video: request.frame, audio: 'loopback' })), discard the video track, keep the
-loopback audio. Confirmed working: ME bar and OTHERS bar move independently from real mic and Zoom audio.
+## 6. Data model (Neon, database "smc")
+auth_users, magic_links, auth_attempts, sessions, meetings (incl mode_type meeting|interview|customer_service), transcript_segments, user_profiles (incl default_language_mode), session_reference_docs, profile_docs, invites, flagged_items. Migrations are a single idempotent scripts/migrate.mjs run at build time.
 
-## 6. Transcription pipeline (quality-critical)
-The two streams are transcribed SEPARATELY (never mixed), so ME and OTHERS stay distinct for the two
-coaching functions.
+## 7. Modes
+meeting (default, fully working), interview (recruitment; mode-aware coaching plus a post-session cited assessment with a deterministic green/orange/red/none signal and fairness exclusions), customer_service (scaffolded for a later vertical). Session type is chosen in preparation.
 
-Key risk (raised by operator 2026-06-22): real-world audio is noisy. Depending on mic, speaker, and
-caller quality, and with bilingual Hindi/English code-switching, transcripts can be partly garbled. If a
-10-word sentence comes through with 2 to 4 unclear words, coaching quality collapses if we coach on the
-garbled text.
+## 8. Design system (app/globals.css)
+Token-based, two themes via a data-theme attribute, with a persisted theme toggle.
+- Dark = Liquid Glass: deep indigo/navy surfaces, a drifting animated backdrop, edge-lit translucent glass panels with a slow travelling sheen, layered shadows.
+- Light = Claymorphism: warm soft background with a gentle drift, puffy clay panels with soft inset inputs.
+- Living backgrounds show through full-page roots (made transparent). Ambient motion is intentional and always plays. Mobile drops backdrop blur for performance.
+- Every surface is responsive from the start.
 
-Answer / design:
-- STT models do SOME context completion (Whisper-family decoders predict plausible words within their
-  window) but cannot be relied on to reconstruct genuinely unclear speech, and Whisper can hallucinate on
-  unclear or near-silent audio. So we do NOT rely on the STT alone.
-- We use a best-in-class multilingual STT for the raw transcript, with per-word confidence scores.
-  Candidates on Cloudflare: Deepgram nova-3 (fast streaming, multilingual, lower hallucination),
-  whisper-large-v3-turbo (strong context, more hallucination risk), and GPT-4o-transcribe (best word
-  error rate and language recognition, latency/cost to check). Final pick to be confirmed by a short
-  bilingual benchmark when wiring.
-- We ADD a context-aware repair/normalisation layer (the "review layer" the operator described). On each
-  completed utterance, a fast LLM takes the raw transcript plus the context pack and the rolling
-  conversation, reconstructs low-confidence spans into the most likely intended sentence, normalises
-  Hindi/English code-switching and transliteration (Devanagari vs Roman), and labels anything it is
-  unsure of. Coaching then runs on the cleaned, confidence-aware text, never on raw garble.
-- Latency control: run repair only on completed utterances and only when confidence is low; use a fast
-  small model; keep prompts terse. This is event-driven, not a constant loop.
-- This repair layer is an explicit component we build. It is not automatic inside the STT.
+## 9. Security posture
+Done: criticals closed (legacy unauthenticated WebSocket and info routes removed, DO fails closed); POST-endpoint auth; CORS locked to the app origin; request-body size cap; security headers; transcript broadcasts scoped to browsers only; coach prompt hardened against injection from transcript and reference text.
+Outstanding (see docs/security-framework.md): H2 move tokens out of the URL query into a header/subprotocol; H3 drop the signing-secret fallback after confirming the dedicated secret in both environments and add a key id for rotation; H4 bind the engine token to the session id with revocation and replay protection; plus strict CSP, data retention and hard-delete, an automated IDOR test, AI-provider data-processing confirmation, CI dependency and secret scanning, and rotating the git-embedded credential.
+Gate: no real third-party or candidate data until H2 to H4 and the retention and prompt-injection items are implemented and tested.
 
-## 7. Coaching (two functions)
-Event-driven on utterance boundaries, debounced, terse, grounded in the context pack.
-- Respond-to-them: on an OTHERS utterance -> suggested line / question / risk / do-not-say warning.
-- Check-my-delivery: on a ME utterance -> alignment verdict vs the user's strategy and vs what the other
-  side just said. Confirms when on track; warns when drifting, being baited, over-conceding, or nearing a
-  self-defined red line. This live self-alignment coaching is the product's strongest unique angle; no
-  shipping competitor does it.
+## 10. Infrastructure (recovery)
+- Repo: mohammadalikhanptg/silent-meeting-copilot (branch main). Commit author must be ali@khan.vg.
+- Vercel: project prj_eF9j961vaT9wRp8nhrYhElUG4XKz, team team_qhm5OOjlJcEv9WD6Ugv9yNpT, URL https://silent-meeting-copilot.vercel.app. Build runs migrate then next build. A failed build does not replace the live production deploy.
+- Engine: https://smc-engine.ali-6b8.workers.dev (worker/), Cloudflare account 6b8a541251738b917ee0289afb8eadce.
+- Neon: database "smc" inside the Vercel-managed Neon project.
+- Sanity: project 74704nsd, dataset production; SMC wfProject 7927b0bf-e2f6-4d14-aec5-6b99764f24d9; projectRoadmap 427dc4bc-eb07-4ba0-9c84-78c8d1293bef; all build events under correlationId smc-v1-build.
+- Windows helper installer: GitHub release tag helper-latest, rebuilt by the smc-helper CI workflow on any push touching helper/. Current asset SMC.Helper.Setup.0.2.0.exe.
+- Vercel env: DATABASE_URL, AUTH_SECRET, AUTH_ALLOWLIST, NEXT_PUBLIC_BASE_URL, RESEND_API_KEY, RESEND_FROM, NEXT_PUBLIC_ENGINE_URL, INTERNAL_SHARED_SECRET, HELPER_SIGNING_SECRET, TOTP_ENC_KEY.
+- Engine secrets: AUTH_SECRET-equivalents via callback, INTERNAL_SHARED_SECRET / HELPER_SIGNING_SECRET, APP_BASE_URL, optional DEEPGRAM and SEARCH_API_KEY.
 
-## 8. Context pack
-User-supplied grounding: case context, red lines, do-not-say, meeting strategy, evidence summary,
-business context, people and entities. Evidence is highest-confidence; live transcript claims are
-unverified. Later: ingest PDFs and folders, and capture context by voice/chat before a call. Real packs
-stay local and gitignored; only the example pack ships.
-
-## 9. UI
-Four panels: OTHERS transcript, ME transcript, "Respond to them", "Your delivery". Plus input/output
-device dropdowns, two live sound meters (one per channel), and a start-of-meeting language hint
-(English / Hindi / Auto). No button grid. A small prepared-lines menu may be kept as an offline fallback.
-
-## 10. Multilingual
-Multilingual STT with a start hint; tolerant of code-switching; the repair layer and coaching LLM cope
-with mixed language. Whisper outputs Devanagari for Hindi; plan to present Roman Hindi where useful.
-
-## 11. Per-meeting log
-A markdown companion log per meeting (both transcripts, suggestions, alignment notes, timestamps),
-designed to sit beside the user's Fireflies transcript for post-meeting analysis in Claude/ChatGPT.
-
-## 12. Legal / consent (UK, general, not legal advice)
-A party may record their own conversation for personal use (RIPA one-party). GDPR risk appears when
-sharing the recording or using it in a business/multi-party context, which needs a lawful basis and a
-notice. Local-first processing reduces exposure. Disclaimer to be built into the UI and terms.
-
-## 13. Commercial positioning (from market research)
-No shipping product combines: silent on-screen-only + dual separated streams + response suggestion AND
-self-alignment coaching + dispute-grounded context + English/Hindi-Urdu. White space = live self-alignment
-coaching. Wedge = UK SMB / family-business disputes and the South Asian business community (Hindi/Urdu).
-Monetise as a one-off/local license first, scoped engine in the user's own cloud. Watch Hedy AI (one
-feature away) as a pivot/stop trigger. Call-centre agent-assist is a larger but crowded market (Balto,
-Cresta); reuse the same engine later, but enter through the open dispute/personal door first.
-
-Harvest from competitors: Balto (live forbidden-phrase alerts = red-lines), Spiky (live checklist
-coverage), Hedy (session modes incl. negotiation, on-device speech, cheap pricing), CueRep (Hindi/Hinglish
-realtime), Clari Copilot (keyword cue cards, talk-ratio), Poised/Read (delivery metrics), Project Raven
-(open-source dual-stream reference), Yoodli/Second Nature (pre-meeting rehearsal mode).
-
-## 14. Infrastructure
-- GitHub repo: mohammadalikhanptg/silent-meeting-copilot (private). Commit identity MUST be ali@khan.vg.
-- Vercel: new project to be linked to the repo (web app deploys once /web exists).
-- Cloudflare: scoped API token (Workers Scripts Edit, Workers AI Edit, AI Gateway Edit, Account Settings
-  Read) created by operator; used at engine-deploy time. Account ID to be recorded here.
-- Local project root on ALISTUDYPC: C:\Projects\silent-meeting-copilot
-  - helper-spike/  : proven Electron capture spike
-  - app/, tools/   : earlier Python/PySide6 prototype (reference; proven capture logic)
-  - packs/         : example-pack ships; real packs gitignored
-  - docs/          : this framework document
-
-## 15. Roadmap / phases
-- Phase 0 (done): dual-stream capture proven in Electron on Windows.
-- Phase 1 (next): version control (GitHub), Vercel project, Cloudflare token. Internal Codex review of
-  this architecture.
-- Phase 2: engine on Cloudflare - helper streams audio in; STT produces raw transcripts of both sides;
-  repair/normalisation layer; results pushed to the web app. Pick STT model via a short bilingual
-  benchmark.
-- Phase 3: four-panel web UI on Vercel with the two coaching functions wired to the engine; device
-  dropdowns and meters surfaced; language hint.
-- Phase 4: context-pack management in the web app; grounding the coaching; per-meeting markdown log.
-- Phase 5: helper hardening - pairing to login, green status, auto-update, code-signing, installer.
-- Phase 6: polish, then private beta on a real call; later commercial packaging.
-- Later: PDF/voice context ingestion; rehearsal mode; Mac version; call-centre agent-assist branch.
-
-## 16. Current status and immediate next steps
-- Capture proven. Repo created locally and committed (ali@khan.vg). Push to GitHub pending (manual repo
-  creation on github.com because gh CLI is absent, then git push; credentials already on the PC).
-- Next: finish push; link Vercel; operator creates Cloudflare token; register this project in the Pacific
-  Roadmap Hub (Sanity); run internal Codex review; then build the engine (Phase 2).
-
-## 17. Open decisions
-- Final STT model (benchmark Deepgram nova-3 vs whisper-large-v3-turbo vs GPT-4o-transcribe on bilingual,
-  noisy audio).
-- LLM for coaching and for the repair layer (via Cloudflare AI Gateway to a frontier model, or a
-  Cloudflare-hosted model). Latency vs quality.
-- Keep a slim offline prepared-lines fallback, or fully cloud.
-- Whether the framework document lives in this repo (current) or a dedicated repo.
-## Changelog
-- 2026-06-22: Dual-stream capture proven in Electron (helper-spike/).
-- 2026-06-22: GitHub repo created and pushed (ali@khan.vg). Framework doc added.
-- 2026-06-22: Next.js web app skeleton added under web/ (four-panel UI shell, responsive, dark theme). Vercel Root Directory MUST be set to "web" so Vercel builds the web app and ignores the Python prototype at repo root (that prototype caused the first Vercel deploy to fail on app/main.py).
+## 11. Build status (summary)
+Phase 1 is functionally complete end to end: capture, transcription (English and Hindi/Urdu), live coaching, minutes, action points, interview assessment, persistence and review, two polished themes, and the security baseline. The current focus is UX fine-tuning from live-test feedback and the remaining security hardening. Detailed and graded status, plus the full backlog, live in ROADMAP.md.
