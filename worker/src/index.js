@@ -1,4 +1,4 @@
-import { SessionDO, transcribeAndClean, generateCoaching, enrichFlaggedItem, generateMinutes } from './session-do.js';
+import { SessionDO, transcribeAndClean, generateCoaching, enrichFlaggedItem, generateMinutes, generateActionPoints } from './session-do.js';
 
 export { SessionDO };
 
@@ -19,7 +19,7 @@ function json(obj, status = 200) {
 // Validate a helper pairing key by calling the Next.js internal endpoint.
 // Returns {valid: true, email} or {valid: false, reason}.
 async function validateHelperKey(key, sessionCode, env) {
-  const secret = env.HELPER_SIGNING_SECRET;
+  const secret = env.INTERNAL_SHARED_SECRET || env.HELPER_SIGNING_SECRET;
   if (!secret) return { valid: false, reason: 'server misconfigured' };
 
   const appUrl = env.APP_BASE_URL || 'https://silent-meeting-copilot.vercel.app';
@@ -46,7 +46,7 @@ async function validateHelperKey(key, sessionCode, env) {
 
 // Validate a browser session token (issued by the app to a logged-in user).
 async function validateSessionToken(token, env) {
-  const secret = env.HELPER_SIGNING_SECRET;
+  const secret = env.INTERNAL_SHARED_SECRET || env.HELPER_SIGNING_SECRET;
   if (!secret) return { valid: false, reason: 'server misconfigured' };
   if (!token) return { valid: false, reason: 'missing token' };
   const appUrl = env.APP_BASE_URL || 'https://silent-meeting-copilot.vercel.app';
@@ -155,6 +155,19 @@ export default {
         return json({ ok: true, ...result });
       } catch (err) {
         console.error('Minutes error:', err);
+        return json({ error: String(err) }, 500);
+      }
+    }
+
+    // POST /action-points — generate speaker + others action points from a transcript
+    // Body: {me, others, title, date, objective?, contextNotes?, speakerName?}
+    if (url.pathname === '/action-points' && request.method === 'POST') {
+      try {
+        const body = await request.json();
+        const result = await generateActionPoints(body, env);
+        return json({ ok: true, ...result });
+      } catch (err) {
+        console.error('Action points error:', err);
         return json({ error: String(err) }, 500);
       }
     }

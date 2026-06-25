@@ -999,6 +999,89 @@ Return ONLY this JSON:
   }
 }
 
+export async function generateActionPoints({ me = [], others = [], title = '', date = '', objective = '', contextNotes = '', speakerName = '' }, env) {
+  const speaker = (speakerName || 'You (the operator)').trim();
+  const base = {
+    title: title || 'Untitled session',
+    date,
+    speakerName: speaker,
+    speakerActions: [],
+    othersActions: [],
+  };
+  const totalLines = me.length + others.length;
+  if (totalLines < 2) return { ...base, emptyState: true };
+
+  const meRecent = me.slice(-40);
+  const othersRecent = others.slice(-40);
+  const transcriptText = [
+    ...meRecent.map(l => `ME (${speaker}): ${l}`),
+    ...othersRecent.map(l => `OTHERS: ${l}`),
+  ].join('\n');
+  const objectiveLine = objective ? `Objective: ${objective}\n` : '';
+  const contextLine = contextNotes ? `Context: ${contextNotes}\n` : '';
+
+  const prompt = `You extract a clear, factual ACTION POINTS list from a meeting transcript.
+
+Meeting: "${title || 'Untitled session'}"
+Date: ${date || 'Unknown'}
+The speaker (the person whose microphone is ME) is named: ${speaker}
+${objectiveLine}${contextLine}
+Transcript:
+${transcriptText}
+
+STRICT RULES:
+- Produce two groups of actions.
+- "speakerActions": actions agreed, assigned, or promised by/for the speaker (${speaker}).
+- "othersActions": actions agreed, assigned, or promised by/for the other people in the meeting. Name each person ONLY if their name is explicitly stated in the transcript, objective, or context; otherwise use "Other participant".
+- Only include actions clearly agreed, assigned, promised, or stated as a next step. Do NOT invent actions, names, or deadlines.
+- If a deadline is stated, include it in "due"; otherwise leave "due" empty.
+- If a group has no actions, return an empty array for it.
+
+Return ONLY this JSON:
+{
+  "speakerActions": [{"action": "...", "due": ""}],
+  "othersActions": [{"who": "...", "action": "...", "due": ""}]
+}`;
+
+  try {
+    const llmResult = await env.AI.run('@cf/meta/llama-3.2-3b-instruct', {
+      messages: [
+        { role: 'system', content: 'You extract factual meeting action points. Return ONLY the JSON object, starting with { and ending with }.' },
+        { role: 'user', content: prompt },
+      ],
+      max_tokens: 900,
+    });
+    const rawResponse = llmResult.response;
+    let parsed = null;
+    if (rawResponse && typeof rawResponse === 'object') {
+      parsed = rawResponse;
+    } else {
+      const responseText = (typeof rawResponse === 'string' ? rawResponse : '').trim();
+      if (responseText) {
+        try { const match = responseText.match(/\{[\s\S]*\}/); if (match) parsed = JSON.parse(match[0]); } catch (_) {}
+      }
+    }
+    if (!parsed) return { ...base, emptyState: false };
+
+    const clean = (arr, withWho) => Array.isArray(arr)
+      ? arr
+          .filter(a => a && typeof a === 'object' && a.action && String(a.action).trim())
+          .map(a => withWho
+            ? { who: String(a.who || 'Other participant').trim(), action: String(a.action).trim(), due: String(a.due || '').trim() }
+            : { action: String(a.action).trim(), due: String(a.due || '').trim() })
+      : [];
+
+    return {
+      ...base,
+      emptyState: false,
+      speakerActions: clean(parsed.speakerActions, false),
+      othersActions: clean(parsed.othersActions, true),
+    };
+  } catch (err) {
+    return { ...base, emptyState: false, error: String(err.message || err) };
+  }
+}
+
 // Generate live coaching from accumulated ME/OTHERS transcript lines.
 // Called by POST /coach. Returns structured coaching object.
 //
