@@ -2,6 +2,28 @@ import { SessionDO, transcribeAndClean, generateCoaching, enrichFlaggedItem, gen
 
 export { SessionDO };
 
+function ctEq(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  let r = 0;
+  for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return r === 0;
+}
+
+// POST-endpoint auth: accept the internal service secret (server-to-server) or a valid
+// short-lived browser engine token. Keeps the stateless generation endpoints non-public.
+async function requirePostAuth(request, env) {
+  const auth = request.headers.get('Authorization') || '';
+  const bearer = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  if (!bearer) return { ok: false };
+  if ((env.INTERNAL_SHARED_SECRET && ctEq(bearer, env.INTERNAL_SHARED_SECRET)) ||
+      (env.HELPER_SIGNING_SECRET && ctEq(bearer, env.HELPER_SIGNING_SECRET))) {
+    return { ok: true, svc: true };
+  }
+  const v = await validateSessionToken(bearer, env);
+  if (v && v.valid) return { ok: true, email: v.email };
+  return { ok: false };
+}
+
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -88,6 +110,7 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
+    CORS['Access-Control-Allow-Origin'] = env.APP_BASE_URL || 'https://silent-meeting-copilot.vercel.app';
     if (request.method === 'OPTIONS') return cors(null, 204);
 
     // Health check — reports active provider and whether Deepgram key is configured
@@ -99,6 +122,15 @@ export default {
 
     // POST /transcribe — one-shot audio transcription for testing
     // Query params: ?lang=hi (language hint), ?mode=english|hindi-urdu|auto
+    const PROTECTED_POST = new Set(['/transcribe', '/coach', '/enrich-flag', '/minutes', '/action-points', '/interview-assessment']);
+    if (request.method === 'POST' && PROTECTED_POST.has(url.pathname)) {
+      const clen = Number(request.headers.get('Content-Length') || 0);
+      const maxBytes = url.pathname === '/transcribe' ? 12000000 : 1000000;
+      if (clen > maxBytes) return json({ error: 'payload too large' }, 413);
+      const a = await requirePostAuth(request, env);
+      if (!a.ok) return json({ error: 'unauthorized' }, 401);
+    }
+
     if (url.pathname === '/transcribe' && request.method === 'POST') {
       try {
         const buf = await request.arrayBuffer();
