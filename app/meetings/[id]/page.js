@@ -9,13 +9,13 @@ export const dynamic = 'force-dynamic';
 
 const ENGINE_URL = process.env.NEXT_PUBLIC_ENGINE_URL || 'https://smc-engine.ali-6b8.workers.dev';
 
-async function fetchCoaching(me, others, objective) {
+async function fetchCoaching(me, others, objective, modeType) {
   if (me.length + others.length < 3) return null;
   try {
     const res = await fetch(`${ENGINE_URL}/coach`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ me, others, objective: objective || '' }),
+      body: JSON.stringify({ me, others, objective: objective || '', modeType: modeType || 'meeting' }),
     });
     const data = await res.json();
     return data.ok ? data : null;
@@ -69,7 +69,7 @@ export default async function MeetingDetailPage({ params }) {
   const others = segments
     .filter(s => s.speaker === 'others')
     .map(s => s.corrected_text || s.cleaned);
-  const coaching = await fetchCoaching(me, others, meeting.objective);
+  const coaching = await fetchCoaching(me, others, meeting.objective, meeting.mode_type);
 
   const clarifiedCount = segments.filter(s => s.clarified_by_me).length;
 

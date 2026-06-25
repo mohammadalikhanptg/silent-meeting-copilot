@@ -70,6 +70,7 @@ export default function SessionPage() {
   const meLinesRef = useRef([]);
   const othersLinesRef = useRef([]);
   const objectiveRef = useRef('');
+  const modeTypeRef = useRef('meeting');
   const contextNotesRef = useRef('');
   const refDocsRef = useRef([]);
   const profileRef = useRef(null);
@@ -84,6 +85,7 @@ export default function SessionPage() {
   useEffect(() => { meLinesRef.current = meLines; }, [meLines]);
   useEffect(() => { othersLinesRef.current = othersLines; }, [othersLines]);
   useEffect(() => { objectiveRef.current = objective; }, [objective]);
+  useEffect(() => { modeTypeRef.current = modeType; }, [modeType]);
   useEffect(() => { contextNotesRef.current = contextNotes; }, [contextNotes]);
   useEffect(() => { refDocsRef.current = refDocs; }, [refDocs]);
   useEffect(() => { flaggedItemsRef.current = flaggedItems; }, [flaggedItems]);
@@ -181,6 +183,7 @@ export default function SessionPage() {
             me,
             others,
             objective: objectiveRef.current,
+            modeType: modeTypeRef.current,
             profile: profileRef.current,
             context: contextNotesRef.current,
             refDocs: refDocsRef.current.filter(d => d.content_text).map(d => ({
