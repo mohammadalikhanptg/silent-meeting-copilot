@@ -74,6 +74,7 @@ export default function SessionPage() {
   const [coaching, setCoaching] = useState(null);
   const [assistCards, setAssistCards] = useState([]);
   const [copiedAssist, setCopiedAssist] = useState(null);
+  const [copiedLink, setCopiedLink] = useState(null);
   const [flaggedItems, setFlaggedItems] = useState([]);
   const [error, setError] = useState('');
   const [wsConnected, setWsConnected] = useState(false);
@@ -900,6 +901,13 @@ export default function SessionPage() {
     }).catch(() => {});
   }, []);
 
+  const copyLink = useCallback((url) => {
+    if (!url) return;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopiedLink(url); setTimeout(() => setCopiedLink(null), 2000);
+    }).catch(() => {});
+  }, []);
+
   // ---- Cockpit panel reorder (Arrange mode) ----
   const persistOrder = useCallback((order) => {
     setPanelOrder(order);
@@ -1159,10 +1167,14 @@ export default function SessionPage() {
                 </label>
                 <div
                   className={`smc-drop-zone${isDragOver ? ' drag-over' : ''}`}
+                  role="button"
+                  tabIndex={0}
+                  aria-label="Upload a .md or .txt reference document"
                   onDrop={handleDrop}
                   onDragOver={handleDragOver}
                   onDragLeave={handleDragLeave}
                   onClick={() => document.getElementById('file-input').click()}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); document.getElementById('file-input').click(); } }}
                   style={{ cursor: 'pointer' }}
                 >
                   <input
@@ -1520,8 +1532,8 @@ export default function SessionPage() {
                             <div key={ri} style={styles.searchResult}>
                               <a href={r.url} target="_blank" rel="noreferrer" style={styles.searchResultTitle}>{r.title}</a>
                               {r.snippet && <div style={styles.searchResultSnippet}>{r.snippet}</div>}
-                              <button style={{ ...styles.copyBtn, marginTop: 4, fontSize: 10 }} onClick={() => navigator.clipboard.writeText(r.url).catch(() => {})}>
-                                Copy link
+                              <button style={{ ...styles.copyBtn, marginTop: 4, fontSize: 10, background: copiedLink === r.url ? '#166534' : '#1a2740' }} onClick={() => copyLink(r.url)}>
+                                {copiedLink === r.url ? '✓ Copied' : 'Copy link'}
                               </button>
                             </div>
                           ))}
