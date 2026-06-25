@@ -779,7 +779,7 @@ export default function SessionPage() {
   // during preparation so helper presence + readiness reflect reality BEFORE
   // Start is pressed. It never sends control:start, so no capture begins.
   useEffect(() => {
-    if (!sessionCode || isLive || isConnecting || isPaused) return undefined;
+    if (!sessionCode || status === 'live' || status === 'connecting' || status === 'paused' || paused) return undefined;
     let cancelled = false;
     let ws = null;
     (async () => {
@@ -804,7 +804,7 @@ export default function SessionPage() {
       if (ws) { try { ws.close(); } catch (_) {} }
       if (monitorWsRef.current) { try { monitorWsRef.current.close(); } catch (_) {} monitorWsRef.current = null; }
     };
-  }, [sessionCode, isLive, isConnecting, isPaused, mode, getEngineToken]);
+  }, [sessionCode, status, paused, mode, getEngineToken]);
 
   const stopSession = useCallback(() => {
     intentionalStop.current = true;
