@@ -59,6 +59,7 @@ export async function GET() {
   return NextResponse.json({
     profile: {
       ...profile,
+      default_language_mode: profile.default_language_mode || 'english',
       profile_reference_text: profile.profile_reference_text || '',
       profile_docs: docs,
     },
@@ -73,12 +74,15 @@ export async function PUT(request) {
   const {
     businesses, postal_address, phone, emails,
     social_links, bio, common_items, profile_reference_text,
+    default_language_mode,
   } = body;
 
   const sql = getSql();
 
   // Ensure profile row exists before updating
   await getOrCreateProfile(sql, session.email);
+
+  const dlm = ['english', 'hindi-urdu', 'auto'].includes(default_language_mode) ? default_language_mode : 'english';
 
   const [updated] = await sql`
     UPDATE user_profiles
@@ -91,6 +95,7 @@ export async function PUT(request) {
       bio                    = ${bio ?? null},
       common_items           = ${JSON.stringify(common_items ?? [])},
       profile_reference_text = ${profile_reference_text ?? null},
+      default_language_mode  = ${dlm},
       updated_at             = now()
     WHERE user_email = ${session.email}
     RETURNING *

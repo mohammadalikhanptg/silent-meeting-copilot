@@ -51,7 +51,7 @@ export default function SessionPage() {
   const [flaggedItems, setFlaggedItems] = useState([]);
   const [error, setError] = useState('');
   const [wsConnected, setWsConnected] = useState(false);
-  const [deepgramAvailable, setDeepgramAvailable] = useState(null);
+  const languageTouched = useRef(false);
   const [saveStatus, setSaveStatus] = useState(''); // '', 'saving', 'saved', 'error'
   const [uploadError, setUploadError] = useState('');
   const [isDragOver, setIsDragOver] = useState(false);
@@ -125,7 +125,7 @@ export default function SessionPage() {
           if (data.meeting.title) setTitle(data.meeting.title);
           if (data.meeting.objective) setObjective(data.meeting.objective);
           if (data.meeting.context_notes) setContextNotes(data.meeting.context_notes);
-          if (data.meeting.language_mode) setMode(data.meeting.language_mode);
+          if (data.meeting.language_mode) { setMode(data.meeting.language_mode); languageTouched.current = true; }
           if (data.meeting.mode_type) setModeType(data.meeting.mode_type);
         }
       }
@@ -141,19 +141,18 @@ export default function SessionPage() {
     } catch (_) {}
   }
 
-  // On mount: check Deepgram availability
-  useEffect(() => {
-    fetch(`${ENGINE_URL}/health`)
-      .then(r => r.json())
-      .then(d => setDeepgramAvailable(!!d.deepgramAvailable))
-      .catch(() => setDeepgramAvailable(false));
-  }, []);
-
   // On mount: fetch operator profile
   useEffect(() => {
     fetch('/api/profile')
       .then(r => r.json())
-      .then(d => { if (d.profile) profileRef.current = d.profile; })
+      .then(d => {
+        if (d.profile) {
+          profileRef.current = d.profile;
+          if (!languageTouched.current && d.profile.default_language_mode) {
+            setMode(d.profile.default_language_mode);
+          }
+        }
+      })
       .catch(() => {});
   }, []);
 
@@ -517,14 +516,6 @@ export default function SessionPage() {
     const resume = opts?.resume === true;
     if (!sessionCode) return;
 
-    if (mode === 'hindi-urdu' && deepgramAvailable === false) {
-      setError(
-        'Hindi / Urdu mode is not available — the multilingual engine key has not been configured. ' +
-        'Select English (fast) to continue.'
-      );
-      return;
-    }
-
     intentionalStop.current = false;
     reconnectCount.current = 0;
     setPaused(false);
@@ -667,10 +658,6 @@ export default function SessionPage() {
                     }).catch(() => {});
                   }
                 }
-              } else if (msg.type === 'error' && msg.code === 'deepgram_unavailable') {
-                setError(
-                  'Hindi / Urdu mode is not enabled on this server. Stop, switch to English, and try again.'
-                );
               } else if (msg.type === 'helper_status') {
                 suppressMicRef.current = !!msg.connected;
                 setHelperConnected(!!msg.connected);
@@ -763,7 +750,7 @@ export default function SessionPage() {
       streamRef.current?.getTracks().forEach(t => t.stop());
       wsRef.current = null; recorderRef.current = null; streamRef.current = null;
     }
-  }, [sessionCode, mode, objective, contextNotes, title, deepgramAvailable, updateStatus, getEngineToken, startHeartbeat, stopHeartbeat]);
+  }, [sessionCode, mode, objective, contextNotes, title, updateStatus, getEngineToken, startHeartbeat, stopHeartbeat]);
 
   const stopSession = useCallback(() => {
     intentionalStop.current = true;
@@ -821,8 +808,7 @@ export default function SessionPage() {
     : modeType === 'customer_service' ? { open: 'Open customer issues', sugg: 'Suggested next steps' }
     : { open: 'Open items from others', sugg: 'Suggested responses' }
   );
-  const deepgramBlocked = mode === 'hindi-urdu' && deepgramAvailable === false;
-  const canStart = !isLive && !isConnecting && !isPaused && !deepgramBlocked;
+  const canStart = !isLive && !isConnecting && !isPaused;
   const correctionCount = coaching?.corrections?.length ?? 0;
   const activeFlaggedItems = flaggedItems.filter(f => !f.addressed);
   const addressedCount = flaggedItems.filter(f => f.addressed).length;
@@ -863,7 +849,7 @@ export default function SessionPage() {
               <select
                 value={mode}
                 onChange={e => setMode(e.target.value)}
-                style={{ ...styles.select, borderColor: deepgramBlocked ? '#92400e' : '#2a2f37' }}
+                style={styles.select}
                 disabled={isLive || isConnecting}
               >
                 <option value="english">English (fast)</option>
@@ -883,11 +869,6 @@ export default function SessionPage() {
 
             {canStart && (
               <button onClick={handleStartClick} style={{ ...styles.btn, background: '#2AB49F', minWidth: 120 }} disabled={!sessionCode}>
-                Start Session
-              </button>
-            )}
-            {deepgramBlocked && !isLive && !isConnecting && !isPaused && (
-              <button style={{ ...styles.btn, background: '#4b5563', minWidth: 120, cursor: 'not-allowed' }} disabled>
                 Start Session
               </button>
             )}
@@ -1052,17 +1033,6 @@ export default function SessionPage() {
           </div>
         )}
 
-        {deepgramBlocked && (
-          <div style={styles.warnBox}>
-            <strong>Hindi / Urdu mode is not currently enabled.</strong> Switch to{' '}
-            <strong>English (fast)</strong> to continue.
-          </div>
-        )}
-        {mode === 'hindi-urdu' && deepgramAvailable === null && (
-          <div style={{ ...styles.warnBox, borderColor: '#1e3a5f', background: '#0c1f33', color: '#93c5fd' }}>
-            Checking whether multilingual mode is available…
-          </div>
-        )}
         {error && <div style={styles.errorBox}>{error}</div>}
         {showDeafWarning && (
           <div style={styles.warnBox}>

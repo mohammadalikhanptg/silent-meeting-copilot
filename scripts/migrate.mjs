@@ -75,6 +75,8 @@ try {
   await sql`CREATE INDEX IF NOT EXISTS idx_ref_docs_meeting ON session_reference_docs (meeting_id, added_at)`;
   // Session 10 P1: profile dual-input — typed reference text + uploaded profile docs
   await sql`ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS profile_reference_text text`;
+  // Session 12: per-user default meeting language (english | hindi-urdu | auto)
+  await sql`ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS default_language_mode text NOT NULL DEFAULT 'english'`;
   await sql`CREATE TABLE IF NOT EXISTS profile_docs (
     id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_email   text NOT NULL,

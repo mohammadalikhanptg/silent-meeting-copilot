@@ -221,9 +221,7 @@ export class SessionDO {
       const useMode = sess.get('mode') || mode || 'auto';
       const useLang = sess.has('lang') ? sess.get('lang') : (lang ?? null);
       const result = await transcribeAndClean(audio, this.env, useLang, useMode);
-      if (result.error === 'deepgram_unavailable') {
-        this._broadcast({ type: 'error', code: 'deepgram_unavailable', message: 'Hindi/Urdu mode requires a Deepgram API key that has not been configured on this server. Please switch to English mode or contact the administrator.' });
-      } else if (result.raw) {
+      if (result.raw) {
         this._broadcast({ type: 'transcript', speaker, ...result });
       }
     } catch (err) {

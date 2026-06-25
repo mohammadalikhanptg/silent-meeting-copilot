@@ -47,6 +47,7 @@ export default function ProfilePage() {
   const [emails, setEmails] = useState([]);
   const [socialLinks, setSocialLinks] = useState([]);
   const [bio, setBio] = useState('');
+  const [defaultLanguageMode, setDefaultLanguageMode] = useState('english');
   const [commonItems, setCommonItems] = useState([]);
 
   // P1: Profile dual-input — typed reference text + uploaded docs
@@ -73,6 +74,7 @@ export default function ProfilePage() {
         setEmails(p.emails || []);
         setSocialLinks(p.social_links || []);
         setBio(p.bio || '');
+        setDefaultLanguageMode(p.default_language_mode || 'english');
         setCommonItems(p.common_items || []);
         setProfileRefText(p.profile_reference_text || '');
         setProfileDocs((p.profile_docs || []).map(doc => ({
@@ -105,6 +107,7 @@ export default function ProfilePage() {
           emails,
           social_links: socialLinks,
           bio: bio || null,
+          default_language_mode: defaultLanguageMode,
           common_items: commonItems,
           profile_reference_text: profileRefText || null,
         }),
@@ -588,6 +591,25 @@ export default function ProfilePage() {
               </div>
             ))}
             {socialLinks.length === 0 && <div style={styles.empty}>No links added</div>}
+          </section>
+
+          {/* Meeting defaults */}
+          <section style={styles.section}>
+            <div style={styles.sectionHeader}>
+              <span style={styles.sectionTitle}>Default meeting language</span>
+            </div>
+            <p style={styles.sectionHint}>
+              New meetings start in this language. English is free and fast. You can still change the language for a single meeting from the dropdown before you press Start.
+            </p>
+            <select
+              style={{ ...styles.input, maxWidth: 280 }}
+              value={defaultLanguageMode}
+              onChange={e => setDefaultLanguageMode(e.target.value)}
+            >
+              <option value="english">English (fast, free)</option>
+              <option value="hindi-urdu">Hindi / Urdu (multilingual)</option>
+              <option value="auto">Auto-detect</option>
+            </select>
           </section>
 
           {/* Bio */}
