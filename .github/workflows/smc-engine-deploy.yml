@@ -1,0 +1,31 @@
+name: Deploy SMC Engine
+# Auto-deploys the Cloudflare worker in worker/ (smc-engine).
+# Requires a CLOUDFLARE_API_TOKEN repository secret (see PR / README notes).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'worker/**'
+      - '.github/workflows/smc-engine-deploy.yml'
+  workflow_dispatch:
+concurrency:
+  group: smc-engine-deploy
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install
+      - name: Deploy Cloudflare Worker
+        run: npm run deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
