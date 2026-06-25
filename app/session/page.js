@@ -58,6 +58,7 @@ export default function SessionPage() {
   const [helperConnected, setHelperConnected] = useState(null);
   const [paused, setPaused] = useState(false);
   const [showComplianceModal, setShowComplianceModal] = useState(false);
+  const [prepCollapsed, setPrepCollapsed] = useState(false);
 
   const wsRef = useRef(null);
   const recorderRef = useRef(null);
@@ -490,6 +491,24 @@ export default function SessionPage() {
     }).catch(() => {});
   }, []);
 
+  const removeFlag = useCallback(async (item) => {
+    if (item?.id) fetch(`/api/flagged-items/${item.id}`, { method: 'DELETE' }).catch(() => {});
+    setFlaggedItems(prev => prev.filter(f => f !== item && (!item.id || f.id !== item.id)));
+    const t = item.text;
+    if (item.speaker === 'me') setMeLines(prev => prev.map(l => l.ts === item.ts && l.cleaned === t ? { ...l, flagged: false } : l));
+    else setOthersLines(prev => prev.map(l => l.ts === item.ts && (l.cleaned === t || l.corrected === t) ? { ...l, flagged: false } : l));
+  }, []);
+
+  const unflagLine = useCallback((line, speaker) => {
+    const t = speaker === 'me' ? line.cleaned : (line.corrected || line.cleaned);
+    const item = flaggedItemsRef.current.find(f => f.ts === line.ts && (f.text === t || f.text === line.cleaned));
+    if (item) { removeFlag(item); return; }
+    if (speaker === 'me') setMeLines(prev => prev.map(l => l === line ? { ...l, flagged: false } : l));
+    else setOthersLines(prev => prev.map(l => l === line ? { ...l, flagged: false } : l));
+  }, [removeFlag]);
+
+  const stripSpk = (txt) => (typeof txt === 'string' ? txt.replace(/^\[Speaker 1\]\s*/, '') : txt);
+
   const getEngineToken = useCallback(async () => {
     const res = await fetch('/api/session/start', { method: 'POST' });
     if (!res.ok) throw new Error('Could not get an engine session token — please sign in again.');
@@ -800,6 +819,7 @@ export default function SessionPage() {
   }, []);
 
   const isLive = status === 'live';
+  useEffect(() => { if (isLive) setPrepCollapsed(true); }, [isLive]);
   const isConnecting = status === 'connecting';
   const isPaused = status === 'paused' || paused;
   const showDeafWarning = isLive && helperConnected === false;
@@ -813,7 +833,7 @@ export default function SessionPage() {
   const activeFlaggedItems = flaggedItems.filter(f => !f.addressed);
   const addressedCount = flaggedItems.filter(f => f.addressed).length;
   const showFollowUp = (isLive || status === 'stopped') && flaggedItems.length > 0;
-  const showPrepPanel = !isLive && !isConnecting;
+  const showPrepPanel = !isConnecting;
 
   return (
     <>
@@ -886,9 +906,16 @@ export default function SessionPage() {
           <div className="smc-prep-panel">
             <div style={styles.prepHeader}>
               <span style={styles.prepTitle}>Session preparation</span>
-              {meetingId && <span style={{ fontSize: 11, color: '#6b7280' }}>ID: {meetingId.slice(0, 8)}…</span>}
+              {meetingId && <span style={{ fontSize: 11, color: 'var(--tx-3)' }}>ID: {meetingId.slice(0, 8)}…</span>}
+              <button
+                onClick={() => setPrepCollapsed(c => !c)}
+                style={styles.prepToggle}
+                title={prepCollapsed ? 'Expand preparation' : 'Collapse preparation'}
+              >
+                {prepCollapsed ? 'Edit details ▾' : 'Collapse ▴'}
+              </button>
             </div>
-            <div style={styles.prepBody}>
+            <div style={prepCollapsed ? { display: 'none' } : styles.prepBody}>
               {/* Session type */}
               <div style={styles.fieldRow}>
                 <label style={styles.selectorLabel} htmlFor="mode-type">Session type</label>
@@ -1071,20 +1098,20 @@ export default function SessionPage() {
                 {meLines.map((l, i) => (
                   <div key={i} style={styles.line}>
                     <span style={styles.ts}>{l.ts}</span>
-                    <span style={{ flex: 1 }}>{l.cleaned}</span>
+                    <span style={{ flex: 1 }}>{stripSpk(l.cleaned)}</span>
                     {l.raw !== l.cleaned && (
                       <span style={styles.hint} title={l.raw}> [raw differs]</span>
                     )}
                     {isLive && meetingIdRef.current && (
                       <button
                         className={`smc-flag-btn${l.flagged ? ' flagged' : ''}`}
-                        onClick={() => !l.flagged && flagItem(l.cleaned, 'me', l.ts, null)}
+                        onClick={() => l.flagged ? unflagLine(l, 'me') : flagItem(l.cleaned, 'me', l.ts, null)}
                         style={{
                           ...styles.flagBtn,
-                          color: l.flagged ? '#f59e0b' : '#cfd4db',
-                          cursor: l.flagged ? 'default' : 'pointer',
+                          color: l.flagged ? 'var(--warn)' : 'var(--tx-2)',
+                          cursor: 'pointer',
                         }}
-                        title={l.flagged ? 'Flagged for follow-up' : 'Flag this for follow-up'}
+                        title={l.flagged ? 'Flagged — click to remove' : 'Flag this for follow-up'}
                       >
                         {l.flagged ? '⚑' : '⚐'}
                       </button>
@@ -1119,18 +1146,18 @@ export default function SessionPage() {
                         <span style={styles.strikethrough} title={`Original: ${l.cleaned}`}>{' '}{l.cleaned}</span>
                       </span>
                     ) : (
-                      <span style={{ flex: 1 }}>{l.cleaned}</span>
+                      <span style={{ flex: 1 }}>{stripSpk(l.cleaned)}</span>
                     )}
                     {isLive && meetingIdRef.current && (
                       <button
                         className={`smc-flag-btn${l.flagged ? ' flagged' : ''}`}
-                        onClick={() => !l.flagged && flagItem(l.corrected || l.cleaned, 'others', l.ts, l.segmentId)}
+                        onClick={() => l.flagged ? unflagLine(l, 'others') : flagItem(l.corrected || l.cleaned, 'others', l.ts, l.segmentId)}
                         style={{
                           ...styles.flagBtn,
-                          color: l.flagged ? '#f59e0b' : '#cfd4db',
-                          cursor: l.flagged ? 'default' : 'pointer',
+                          color: l.flagged ? 'var(--warn)' : 'var(--tx-2)',
+                          cursor: 'pointer',
                         }}
-                        title={l.flagged ? 'Flagged for follow-up' : 'Flag this for follow-up'}
+                        title={l.flagged ? 'Flagged — click to remove' : 'Flag this for follow-up'}
                       >
                         {l.flagged ? '⚑' : '⚐'}
                       </button>
@@ -1189,7 +1216,7 @@ export default function SessionPage() {
                     <div style={styles.coachSectionLabel}>{coachLabels.sugg}</div>
                     <ul style={styles.coachList}>
                       {coaching.suggestions.map((s, i) => (
-                        <li key={i} style={{ ...styles.coachItem, color: '#fde68a' }}>{s}</li>
+                        <li key={i} style={{ ...styles.coachItem, color: 'var(--tx)', fontWeight: 500 }}>{s}</li>
                       ))}
                     </ul>
                   </div>
@@ -1313,7 +1340,7 @@ export default function SessionPage() {
                     >
                       <div style={styles.tpNumber}>{idx + 1}</div>
                       <div style={{ flex: 1 }}>
-                        <div style={styles.tpQuote}>&ldquo;{item.text}&rdquo;</div>
+                        <div style={styles.tpQuote}>&ldquo;{stripSpk(item.text)}&rdquo;</div>
                         <div style={styles.tpMeta}>
                           {item.speaker === 'others' ? 'OTHERS' : 'ME'} &middot; {item.ts}
                         </div>
@@ -1333,6 +1360,7 @@ export default function SessionPage() {
                           {item.addressed ? '↩ Un-address' : '✓ Mark addressed'}
                         </button>
                       </div>
+                      <button onClick={() => removeFlag(item)} title="Remove this flag" style={styles.removeFlagBtn}>×</button>
                     </div>
                   ))}
                 </div>
@@ -1428,6 +1456,7 @@ const styles = {
     padding: '10px 16px', borderBottom: '1px solid var(--others-border)',
   },
   prepTitle: { fontSize: 13, fontWeight: 600, color: 'var(--others)' },
+  prepToggle: { marginLeft: 'auto', background: 'var(--surf-1)', border: '1px solid var(--border)', color: 'var(--tx-2)', borderRadius: 8, padding: '4px 11px', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600 },
   prepBody: { display: 'flex', flexDirection: 'column', gap: 14, padding: 16 },
   fieldRow: { display: 'flex', flexDirection: 'column', gap: 4 },
   uploadError: { background: 'var(--error-bg)', border: '1px solid rgba(244,63,94,0.25)', borderRadius: 6, padding: '6px 10px', fontSize: 12, color: '#fca5a5', marginTop: 4 },
@@ -1451,6 +1480,7 @@ const styles = {
   ts: { fontSize: 10, color: 'var(--tx-3)', flexShrink: 0, fontFeatureSettings: '"tnum"' },
   hint: { fontSize: 10, color: 'var(--tx-3)', cursor: 'help' },
   flagBtn: { background: 'none', border: 'none', fontSize: 17, padding: '0 4px', flexShrink: 0, lineHeight: 1 },
+  removeFlagBtn: { background: 'none', border: 'none', color: 'var(--tx-3)', fontSize: 18, lineHeight: 1, cursor: 'pointer', padding: '0 2px', flexShrink: 0, alignSelf: 'flex-start' },
   clarifiedBadge: {
     fontSize: 9, fontWeight: 700, color: '#34d399', background: '#052e16',
     border: '1px solid #166534', borderRadius: 4, padding: '1px 5px', marginRight: 5,
@@ -1459,19 +1489,19 @@ const styles = {
   strikethrough: { fontSize: 11, color: 'var(--tx-3)', textDecoration: 'line-through', cursor: 'help', marginLeft: 4 },
   // Coaching panel (outer div uses className="smc-coach-panel")
   coachHeader: { display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderBottom: '1px solid var(--coach-border)', flexWrap: 'wrap' },
-  coachTitle: { fontSize: 13, fontWeight: 600, color: 'var(--coach)' },
+  coachTitle: { fontSize: 15, fontWeight: 700, color: 'var(--coach)' },
   coachTs: { fontSize: 11, color: 'var(--tx-3)' },
   coachBody: { display: 'flex', flexWrap: 'wrap', gap: 0 },
-  coachSection: { flex: '1 1 220px', padding: '12px 16px', borderRight: '1px solid rgba(255,255,255,0.05)', borderBottom: '1px solid rgba(255,255,255,0.05)' },
-  coachSectionLabel: { fontSize: 10, color: 'var(--tx-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 },
+  coachSection: { flex: '1 1 300px', padding: '14px 18px', borderRight: '1px solid rgba(255,255,255,0.05)', borderBottom: '1px solid rgba(255,255,255,0.05)' },
+  coachSectionLabel: { fontSize: 11, fontWeight: 700, color: 'var(--tx-2)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 },
   balanceRow: { display: 'flex', alignItems: 'center', gap: 8 },
   balanceLabel: { fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', minWidth: 60 },
   balanceBar: { flex: 1, height: 8, background: 'var(--border)', borderRadius: 4, overflow: 'hidden' },
   balanceFill: { height: '100%', background: 'linear-gradient(to right, var(--me), var(--others))', borderRadius: 4, transition: 'width 0.7s cubic-bezier(0.16,1,0.3,1)' },
-  coachList: { margin: 0, paddingLeft: 16, fontSize: 13, lineHeight: 1.6, color: 'var(--tx)' },
-  coachItem: { marginBottom: 4 },
+  coachList: { margin: 0, paddingLeft: 18, fontSize: 15, lineHeight: 1.7, color: 'var(--tx)' },
+  coachItem: { marginBottom: 8 },
   coachNone: { fontSize: 13, color: 'var(--tx-3)', fontStyle: 'italic' },
-  coachAlignment: { fontSize: 13, color: 'var(--warn)', lineHeight: 1.5 },
+  coachAlignment: { fontSize: 14.5, color: 'var(--warn)', lineHeight: 1.6 },
   // Assist panel (outer div uses className="smc-assist-panel")
   assistHeader: { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', borderBottom: '1px solid var(--assist-border)', flexWrap: 'wrap' },
   assistTitle: { fontSize: 13, fontWeight: 600, color: 'var(--assist)' },

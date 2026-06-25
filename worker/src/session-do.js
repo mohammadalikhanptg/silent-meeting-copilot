@@ -346,11 +346,15 @@ async function transcribeDeepgram(audioBytes, env, lang) {
   // If diarization returned per-word speaker labels, reconstruct with [Speaker N] markers.
   // Group consecutive words from the same speaker into runs.
   if (words && words.length > 0 && words[0]?.speaker !== undefined) {
+    // Only attribute speakers when diarization actually found more than one.
+    // A single-speaker stream is already identified as ME or OTHERS, so a
+    // blanket "[Speaker 1]" on every line is noise — omit it entirely.
+    const multiSpeaker = new Set(words.map(w => w.speaker)).size > 1;
     let labeled = '';
     let currentSpeaker = -1;
     for (const w of words) {
       const spk = w.speaker;
-      if (spk !== currentSpeaker) {
+      if (multiSpeaker && spk !== currentSpeaker) {
         currentSpeaker = spk;
         if (labeled) labeled += ' ';
         labeled += `[Speaker ${spk + 1}] `;
