@@ -38,6 +38,7 @@ export default function SessionPage() {
   const [meetingId, setMeetingId] = useState(null); // set from ?m= param or on create
   const [title, setTitle] = useState('');
   const [mode, setMode] = useState('english');
+  const [modeType, setModeType] = useState('meeting');
   const [objective, setObjective] = useState('');
   const [contextNotes, setContextNotes] = useState('');
   const [refDocs, setRefDocs] = useState([]); // [{id, filename, size_bytes, content_text}]
@@ -123,6 +124,7 @@ export default function SessionPage() {
           if (data.meeting.objective) setObjective(data.meeting.objective);
           if (data.meeting.context_notes) setContextNotes(data.meeting.context_notes);
           if (data.meeting.language_mode) setMode(data.meeting.language_mode);
+          if (data.meeting.mode_type) setModeType(data.meeting.mode_type);
         }
       }
       // Load reference docs
@@ -289,6 +291,7 @@ export default function SessionPage() {
             objective: objective || null,
             language_mode: mode,
             context_notes: contextNotes || null,
+            mode_type: modeType,
           }),
         });
         if (!res.ok) throw new Error('Create failed');
@@ -308,6 +311,7 @@ export default function SessionPage() {
             title: title || null,
             objective: objective || null,
             context_notes: contextNotes || null,
+            mode_type: modeType,
           }),
         });
       }
@@ -347,6 +351,7 @@ export default function SessionPage() {
             objective: objective || null,
             language_mode: mode,
             context_notes: contextNotes || null,
+            mode_type: modeType,
           }),
         });
         if (!res.ok) throw new Error('Create failed');
@@ -544,6 +549,7 @@ export default function SessionPage() {
             language_mode: mode,
             context_notes: contextNotes || null,
             session_code: sessionCode || null,
+            mode_type: modeType,
           }),
         });
         if (meetingRes.ok) {
@@ -564,6 +570,7 @@ export default function SessionPage() {
             objective: objective || null,
             context_notes: contextNotes || null,
             session_code: sessionCode || null,
+            mode_type: modeType,
           }),
         }).catch(() => {});
       }
@@ -893,6 +900,25 @@ export default function SessionPage() {
               {meetingId && <span style={{ fontSize: 11, color: '#6b7280' }}>ID: {meetingId.slice(0, 8)}…</span>}
             </div>
             <div style={styles.prepBody}>
+              {/* Session type */}
+              <div style={styles.fieldRow}>
+                <label style={styles.selectorLabel} htmlFor="mode-type">Session type</label>
+                <select
+                  id="mode-type"
+                  value={modeType}
+                  onChange={e => setModeType(e.target.value)}
+                  style={styles.textInput}
+                  disabled={isLive || isConnecting}
+                >
+                  <option value="meeting">Meeting (default)</option>
+                  <option value="interview">Interview (recruitment)</option>
+                  <option value="customer_service">Customer service</option>
+                </select>
+                <div style={{ fontSize: 10, color: '#4b5563', marginTop: 2 }}>
+                  Meeting works today. Interview and customer service add vertical-specific assistance in upcoming releases.
+                </div>
+              </div>
+
               {/* Title */}
               <div style={styles.fieldRow}>
                 <label style={styles.selectorLabel} htmlFor="session-title">Session title (optional)</label>

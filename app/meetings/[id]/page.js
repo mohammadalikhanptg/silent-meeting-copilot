@@ -87,6 +87,14 @@ export default async function MeetingDetailPage({ params }) {
             <span style={{ textTransform: 'uppercase', fontSize: 10, color: 'var(--others)' }}>
               {meeting.language_mode || 'english'}
             </span>
+            {meeting.mode_type && meeting.mode_type !== 'meeting' && (
+              <>
+                &nbsp;&middot;&nbsp;
+                <span style={{ textTransform: 'capitalize', fontSize: 10, color: 'var(--me)' }}>
+                  {meeting.mode_type.replace('_', ' ')}
+                </span>
+              </>
+            )}
             {clarifiedCount > 0 && (
               <>
                 &nbsp;&middot;&nbsp;
