@@ -820,7 +820,6 @@ body::before {
   background-size: 170% 170%, 170% 170%, 170% 170%, 300% 300%;
   animation: smc-liquid 32s ease-in-out infinite;
 }
-@media (prefers-reduced-motion: reduce) { body::before { animation: none; } }
 
 /* Liquid edge-light + faint inner glow on glass surfaces (dark) */
 .glass, .glass-raised, .session-card,
@@ -910,25 +909,25 @@ body::before {
 /* Drifting backdrop — transform-based so it is clearly alive */
 @keyframes smc-drift {
   0%   { transform: translate(0, 0) scale(1); }
-  33%  { transform: translate(-3%, 2%) scale(1.06); }
-  66%  { transform: translate(2%, -3%) scale(1.04); }
+  33%  { transform: translate(-7%, 5%) scale(1.12); }
+  66%  { transform: translate(6%, -6%) scale(1.08); }
   100% { transform: translate(0, 0) scale(1); }
 }
 body::before {
   background:
-    radial-gradient(46% 40% at 16% 20%, rgba(124,108,255,0.34), transparent 66%),
-    radial-gradient(44% 42% at 84% 76%, rgba(38,196,232,0.24), transparent 66%),
-    radial-gradient(40% 36% at 60% 10%, rgba(196,92,255,0.20), transparent 70%);
+    radial-gradient(48% 42% at 16% 20%, rgba(124,108,255,0.50), transparent 64%),
+    radial-gradient(46% 44% at 84% 76%, rgba(38,196,232,0.38), transparent 64%),
+    radial-gradient(42% 38% at 60% 10%, rgba(196,92,255,0.32), transparent 68%);
   background-color: #070912;
-  animation: smc-drift 26s ease-in-out infinite;
+  animation: smc-drift 20s ease-in-out infinite;
 }
 [data-theme="light"] body::before {
   background:
-    radial-gradient(44% 40% at 18% 22%, rgba(108,128,255,0.22), transparent 70%),
-    radial-gradient(42% 40% at 82% 78%, rgba(255,158,128,0.18), transparent 70%),
-    radial-gradient(38% 34% at 62% 12%, rgba(150,110,255,0.14), transparent 72%);
+    radial-gradient(46% 42% at 18% 22%, rgba(108,128,255,0.36), transparent 68%),
+    radial-gradient(44% 42% at 82% 78%, rgba(255,150,120,0.30), transparent 68%),
+    radial-gradient(40% 36% at 62% 12%, rgba(150,110,255,0.26), transparent 70%);
   background-color: transparent;
-  animation: smc-drift 32s ease-in-out infinite;
+  animation: smc-drift 24s ease-in-out infinite;
 }
 
 /* Slow diagonal sheen that travels across every panel = life over content */
@@ -938,20 +937,20 @@ body::before {
 .glass, .glass-raised, .session-card, .profile-section, .admin-section,
 .smc-coach-panel, .smc-assist-panel, .smc-followup-outer, .smc-prep-panel {
   background-image:
-    linear-gradient(115deg, transparent 30%, rgba(255,255,255,0.07) 48%, transparent 66%),
+    linear-gradient(115deg, transparent 30%, rgba(255,255,255,0.16) 48%, transparent 66%),
     linear-gradient(160deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
   background-size: 220% 100%, 100% 100%;
   background-repeat: no-repeat;
-  animation: smc-sheen 13s linear infinite;
+  animation: smc-sheen 9s linear infinite;
   box-shadow: 0 12px 38px rgba(0,0,0,0.52), inset 0 1px 0 rgba(255,255,255,0.24), inset 0 -22px 40px rgba(124,124,255,0.06), 0 0 0 1px rgba(124,124,255,0.06);
 }
 .smc-transcript-panel {
   background-image:
-    linear-gradient(115deg, transparent 32%, rgba(255,255,255,0.05) 50%, transparent 68%),
+    linear-gradient(115deg, transparent 32%, rgba(255,255,255,0.13) 50%, transparent 68%),
     linear-gradient(160deg, rgba(42,48,92,0.96), rgba(15,19,38,0.96));
   background-size: 220% 100%, 100% 100%;
   background-repeat: no-repeat;
-  animation: smc-sheen 17s linear infinite;
+  animation: smc-sheen 11s linear infinite;
   box-shadow: 0 10px 32px rgba(0,0,0,0.46), inset 0 1px 0 rgba(255,255,255,0.12), 0 0 0 1px rgba(124,124,255,0.05);
 }
 
@@ -967,18 +966,14 @@ body::before {
 [data-theme="light"] .smc-followup-outer,
 [data-theme="light"] .smc-prep-panel {
   background-image:
-    linear-gradient(115deg, transparent 36%, rgba(255,255,255,0.6) 50%, transparent 64%),
+    linear-gradient(115deg, transparent 36%, rgba(130,145,255,0.22) 50%, transparent 64%),
     linear-gradient(160deg, #ffffff, #e9edfb);
   background-size: 220% 100%, 100% 100%;
   background-repeat: no-repeat;
-  animation: smc-sheen 20s linear infinite;
+  animation: smc-sheen 12s linear infinite;
   box-shadow: 14px 14px 30px rgba(120,130,170,0.22), -10px -10px 24px rgba(255,255,255,0.96), inset 1px 1px 2px rgba(255,255,255,0.85);
 }
 
 /* Accent gradient on the primary headings/wordmark for a modern touch */
 .sessions-title { background: linear-gradient(120deg, var(--accent-hi), var(--others)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
 
-@media (prefers-reduced-motion: reduce) {
-  body::before, .glass, .glass-raised, .session-card, .profile-section, .admin-section,
-  .smc-transcript-panel, .smc-coach-panel, .smc-assist-panel, .smc-followup-outer, .smc-prep-panel { animation: none !important; }
-}

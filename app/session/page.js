@@ -61,6 +61,7 @@ export default function SessionPage() {
   const [prepCollapsed, setPrepCollapsed] = useState(false);
 
   const wsRef = useRef(null);
+  const monitorWsRef = useRef(null);
   const recorderRef = useRef(null);
   const streamRef = useRef(null);
   const intentionalStop = useRef(false);
@@ -441,6 +442,8 @@ export default function SessionPage() {
       addressed: false,
     };
     setFlaggedItems(prev => [...prev, optimisticItem]);
+    if (speaker === 'me') setMeLines(prev => prev.map(l => l.ts === ts && l.cleaned === text ? { ...l, flagged: true } : l));
+    else setOthersLines(prev => prev.map(l => l.ts === ts && (l.cleaned === text || l.corrected === text) ? { ...l, flagged: true } : l));
 
     try {
       const res = await fetch('/api/flagged-items', {
@@ -536,6 +539,7 @@ export default function SessionPage() {
     if (!sessionCode) return;
 
     intentionalStop.current = false;
+    if (monitorWsRef.current) { try { monitorWsRef.current.close(); } catch (_) {} monitorWsRef.current = null; }
     reconnectCount.current = 0;
     setPaused(false);
     updateStatus('connecting');
@@ -771,6 +775,37 @@ export default function SessionPage() {
     }
   }, [sessionCode, mode, objective, contextNotes, title, updateStatus, getEngineToken, startHeartbeat, stopHeartbeat]);
 
+  // Pre-start readiness monitor: keep a lightweight browser connection open
+  // during preparation so helper presence + readiness reflect reality BEFORE
+  // Start is pressed. It never sends control:start, so no capture begins.
+  useEffect(() => {
+    if (!sessionCode || isLive || isConnecting || isPaused) return undefined;
+    let cancelled = false;
+    let ws = null;
+    (async () => {
+      try { await getEngineToken(); } catch (_) { return; }
+      if (cancelled) return;
+      const qs = new URLSearchParams({ mode, role: 'browser', token: tokenRef.current || '' });
+      const langHint = MODE_LANG[mode];
+      if (langHint) qs.set('lang', langHint);
+      try { ws = new WebSocket(ENGINE_URL.replace(/^http/, 'ws') + `/app/ws?${qs}`); } catch (_) { return; }
+      monitorWsRef.current = ws;
+      ws.onmessage = (evt) => {
+        try {
+          const msg = JSON.parse(evt.data);
+          if (msg.type === 'helper_status') setHelperConnected(!!msg.connected);
+          else if (msg.type === 'session_state' && typeof msg.helperConnected === 'boolean') setHelperConnected(msg.helperConnected);
+        } catch (_) {}
+      };
+      ws.onclose = () => { if (monitorWsRef.current === ws) monitorWsRef.current = null; };
+    })();
+    return () => {
+      cancelled = true;
+      if (ws) { try { ws.close(); } catch (_) {} }
+      if (monitorWsRef.current) { try { monitorWsRef.current.close(); } catch (_) {} monitorWsRef.current = null; }
+    };
+  }, [sessionCode, isLive, isConnecting, isPaused, mode, getEngineToken]);
+
   const stopSession = useCallback(() => {
     intentionalStop.current = true;
     if (segmentTimer.current) { clearTimeout(segmentTimer.current); segmentTimer.current = null; }
@@ -833,7 +868,7 @@ export default function SessionPage() {
   const activeFlaggedItems = flaggedItems.filter(f => !f.addressed);
   const addressedCount = flaggedItems.filter(f => f.addressed).length;
   const showFollowUp = (isLive || status === 'stopped') && flaggedItems.length > 0;
-  const showPrepPanel = !isConnecting;
+  const showPrepPanel = !isLive && !isConnecting;
 
   return (
     <>
@@ -878,13 +913,14 @@ export default function SessionPage() {
               </select>
             </div>
 
-            <span style={{ ...styles.dot, background: isLive ? '#22c55e' : isConnecting ? '#facc15' : isPaused ? '#f59e0b' : '#6b7280' }} />
+            <span style={{ ...styles.dot, background: isLive ? '#22c55e' : isConnecting ? '#facc15' : isPaused ? '#f59e0b' : (helperConnected ? '#22c55e' : '#6b7280') }} />
             <span style={styles.statusText}>
               {isLive ? `Live — ${MODE_LABEL[mode] || mode}`
                 : isConnecting ? 'Connecting…'
                 : isPaused ? 'Paused'
                 : status === 'stopped' ? 'Stopped'
-                : 'Ready'}
+                : helperConnected ? 'Ready'
+                : 'Waiting for desktop helper…'}
             </span>
 
             {canStart && (
@@ -1096,7 +1132,7 @@ export default function SessionPage() {
               <div ref={meScrollRef} style={styles.transcript}>
                 {meLines.length === 0 && <span style={styles.muted}>Your speech will appear here…</span>}
                 {meLines.map((l, i) => (
-                  <div key={i} style={styles.line}>
+                  <div key={i} style={l.flagged ? { ...styles.line, ...styles.lineFlagged } : styles.line}>
                     <span style={styles.ts}>{l.ts}</span>
                     <span style={{ flex: 1 }}>{stripSpk(l.cleaned)}</span>
                     {l.raw !== l.cleaned && (
@@ -1137,7 +1173,7 @@ export default function SessionPage() {
                   </span>
                 )}
                 {othersLines.map((l, i) => (
-                  <div key={i} style={styles.line}>
+                  <div key={i} style={l.flagged ? { ...styles.line, ...styles.lineFlagged } : styles.line}>
                     <span style={styles.ts}>{l.ts}</span>
                     {l.clarifiedByMe ? (
                       <span style={{ flex: 1 }}>
@@ -1477,6 +1513,7 @@ const styles = {
   transcript: { flex: 1, overflowY: 'auto', fontSize: 14, lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: 6 },
   muted: { color: 'var(--tx-2)', fontStyle: 'italic' },
   line: { display: 'flex', flexWrap: 'nowrap', gap: 6, alignItems: 'baseline' },
+  lineFlagged: { background: 'rgba(245,158,11,0.18)', borderLeft: '3px solid var(--warn)', borderRadius: 6, paddingLeft: 8, paddingTop: 2, paddingBottom: 2, marginLeft: -8 },
   ts: { fontSize: 10, color: 'var(--tx-3)', flexShrink: 0, fontFeatureSettings: '"tnum"' },
   hint: { fontSize: 10, color: 'var(--tx-3)', cursor: 'help' },
   flagBtn: { background: 'none', border: 'none', fontSize: 17, padding: '0 4px', flexShrink: 0, lineHeight: 1 },
