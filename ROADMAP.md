@@ -276,3 +276,20 @@ Future / Phase 2:
 13. Speaker-labelled note-taker output as a paid option so a customer does not need a separate note-taker.
 14. Customer-service softphone auto start/stop integration.
 15. Per-industry-vertical scaling and polish, with cross-review before launch.
+
+## Progress — 25 Jun 2026 (later)
+Done and deployed since the status update above:
+- Paragraph-level timestamps (backlog 1) — commit 08a77d6.
+- Follow-up tracker enrichment restored; talking points work again (backlog 2, the auth regression) — commit 3d1706e. Live references still need a Brave key (operator cost decision).
+- Profile about-me prompt now tailored to known facts, only asks for gaps (backlog 5) — commit ab746b9.
+- Research column redesign: the old References column is now "Research", always useful without a paid key, with per-item Web/News/LinkedIn jump-off links plus live references when a key exists (backlog 4) — commit cc84d83.
+
+Verified by inspection, no code change needed:
+- Helper-to-session pre-start association (backlog 7). The engine associates the helper with the user's session Durable Object at launch, not at Start, and sends current helper presence to a browser the moment it connects during preparation. The cockpit's pre-start monitor connects with a valid token and reads it. Pre-start readiness is correct end to end in code; needs only a live confirmation on the desktop test.
+
+Revised remaining backlog (priority order):
+1. Full drag-to-reorder "jiggle" dashboard layout with saved positions. This is the next major item. It is a larger cockpit refactor and benefits from visual iteration, so it is sequenced as a dedicated piece rather than rushed; width stays fixed, vertical reorder only, opt-in edit mode, order persisted.
+2. Optional: provision a Brave search key to switch on live references in the Research column (operator cost decision).
+3. Code-sign the Windows installer (needs a code-signing certificate; operator provisioning).
+4. Security hardening, gated before any real third-party/candidate data: tokens out of the URL (needs helper rebuild), drop the signing-secret fallback with a key id for rotation, bind the engine token to the session with revocation/replay protection, strict CSP, retention/hard-delete, IDOR test, AI-provider data agreement, CI scanning, rotate the git credential.
+5. Phase 2: speaker-labelled note-taker paid option; softphone auto start/stop; per-vertical scaling.
