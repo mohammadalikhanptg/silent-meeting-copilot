@@ -395,6 +395,12 @@ async function transcribeDeepgram(audioBytes, env, lang) {
     audio: { body: new Response(audioBytes).body, contentType: 'audio/webm' },
     smart_format: true,
     punctuate: true,
+    // Data-handling: opt this request out of the Deepgram Model Improvement
+    // Program so submitted audio is not used to improve the model. nova-3 is the
+    // only Workers AI model we use that is a third-party (Deepgram) service
+    // exposing this flag; the Cloudflare-native models (Whisper, Llama) have no
+    // such program. See docs/security-framework.md §9 (AI-provider position).
+    mip_opt_out: true,
   };
   if (lang) {
     params.language = lang;

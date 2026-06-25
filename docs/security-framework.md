@@ -125,3 +125,34 @@ Do not onboard any real third-party or candidate meeting data until H1 to H4 and
 Done and deployed since the review: criticals C1/C2 (legacy unauthenticated WebSocket + info routes removed; Durable Object fails closed without an injected authenticated identity); client-facing errors genericised; H1 closed — all engine POST endpoints now require either the internal service secret or a valid short-lived engine token, CORS is locked from wildcard to the app origin, and a request-body size cap is enforced; security headers added (HSTS, X-Content-Type-Options nosniff, X-Frame-Options DENY, Referrer-Policy, Permissions-Policy). Verified: an unauthenticated POST to a generation endpoint now returns 401 and the CORS allow-origin is the app origin only.
 
 Still open (next dedicated pass, best done after the operator's meeting test because they touch the live authentication path or secret rotation): H2 move the helper key and engine token out of the URL query string into a header/subprotocol; H3 drop the HELPER_SIGNING_SECRET internal fallback once INTERNAL_SHARED_SECRET is confirmed, add a signing-key id for staged rotation; H4 bind the engine token to the active app session id with a revocation check and jti replay protection. Mediums remaining: role-scope broadcasts so helpers do not receive transcript messages; prompt-injection isolation for reference docs/transcripts in the coach prompt (the interview assessment already isolates them); a strict Content-Security-Policy; an automated IDOR test; data retention and hard-delete; AI-provider data-processing confirmation; CI dependency and secret scanning. The gate stands: no real third-party or candidate data until H2-H4 and the broadcast-scoping, prompt-injection and retention mediums are implemented and tested.
+
+## 9. AI-provider data-processing position (confirmed, 25 Jun 2026)
+
+All inference runs on **Cloudflare Workers AI** (`env.AI`): Whisper large-v3-turbo (English ASR, Cloudflare-native), Llama 3.x instruct (coaching/minutes/assessment, Cloudflare-native), and Deepgram nova-3 (Hindi/Urdu + auto ASR, a third-party model hosted on Workers AI). No audio or text is sent to any provider outside Workers AI.
+
+Confirmed Workers AI data terms (Cloudflare, *Workers AI — Data usage*):
+- **No training on customer content.** Cloudflare states: *"Cloudflare does not use your Customer Content to (1) train any AI models made available on Workers AI or (2) improve any Cloudflare or third-party services, and would not do so unless we received your explicit consent."* We give no such consent.
+- **No retention in our usage.** Cloudflare retains Workers AI Customer Content only if it is written to a Cloudflare storage service (R2, KV, Durable Objects, Vectorize) *in conjunction with* the AI call. Our transcription/coaching path passes audio and text straight to `env.AI.run` and persists only the resulting text to **our own** Neon database — it writes nothing to Cloudflare storage from the AI path — so Workers AI retains nothing.
+- **This is a processor relationship.** Cloudflare acts as a processor for the inference; the operator remains controller of the meeting/interview content.
+
+Provider-level opt-out applied:
+- nova-3 is the only model we use that exposes a model-improvement opt-out. We set **`mip_opt_out: true`** on every `@cf/deepgram/nova-3` call (`worker/src/session-do.js`, `transcribeDeepgram`), opting our requests out of the Deepgram Model Improvement Program. The Cloudflare-native Whisper and Llama models have no equivalent program and are covered by the no-training/no-retention statement above.
+
+This closes finding **F5** (data-handling half) and the Section-8 medium "confirm and record the AI providers' data-processing terms (no training retention)". The separate F5 client-error-leakage half was already closed (errors genericised, second pass).
+
+## 10. Retention and hard-delete (implemented, 25 Jun 2026)
+
+Closes **F4** retention/deletion and the Section-8 medium "define and enforce a retention and hard-delete policy". Full policy: `docs/retention-policy.md`. Single source of truth in code: `app/lib/retention.js`.
+
+- **Explicit windows** (env-overridable) for every data class: sessions (`meetings`) default 90 days after end; transcripts, derived coaching artifacts (`flagged_items`) and reference docs (`session_reference_docs`) share the parent session's lifecycle; magic links 7 days; auth attempts 30 days; expired/revoked auth sessions 30 days. **Temporary audio chunks: never persisted** — transcribed in memory by the engine and discarded (no audio table or file artifact; asserted by CI grep). **Server logs:** platform-managed (Vercel/Cloudflare); we add no app-level logging of content.
+- **Future bot sessions** (third-party voice) default to a **short 7-day** window (`RETENTION.botSessionDays`); the purge job already honours `mode_type='bot'` so the window is enforced the day the bot lands.
+- **Operator-triggerable hard-delete:** `DELETE /api/meetings/[id]` removes the session row and every child row (transcript segments, flagged artifacts, reference docs), ownership-scoped, and returns `purged:true` only when a re-count proves zero rows remain. A scheduled `scripts/purge-retention.mjs` (`npm run purge-retention`) applies the windows in bulk; wire it to a daily cron when real/bot data lands.
+- **Proof:** `scripts/test-retention.mjs` seeds a session with rows in every child table, hard-deletes it, and asserts `remaining.total === 0` while a sibling session is untouched; it also proves window-based purge (including the short bot window). Runs offline against an in-memory store and, when `DATABASE_URL` is present, against live Neon.
+
+## 11. IDOR isolation test (implemented, 25 Jun 2026)
+
+Closes **F7**. `scripts/test-idor.mjs`: (a) a structural sweep asserting **every** data route under `meetings`, `flagged-items` and `profile-docs` authenticates the caller and scopes its query by the authenticated owner (email filter or meeting-ownership join); (b) a runtime proof that account B cannot read or delete account A's session — and that B's delete attempt removes zero of A's transcript/flag/reference rows — while A can delete its own. Runs offline and against live Neon. Wired into CI.
+
+## 12. CI dependency + secret scanning (implemented, 25 Jun 2026)
+
+Closes **F8** (scanning half; rotating the embedded Mac git credential remains an operator action). `.github/workflows/security.yml` runs on every pull request and push to main: an `npm audit --audit-level=high` on both the web app and the worker (fails on high/critical), a gitleaks full-history secret scan (fails on any finding), and the keyless retention + IDOR tests. Current audit status: 2 moderate advisories (postcss/next), no high/critical — the gate passes.
