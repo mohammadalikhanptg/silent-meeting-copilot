@@ -32,6 +32,9 @@ export async function PATCH(request, { params }) {
   if (body.session_code !== undefined) {
     await sql`UPDATE meetings SET session_code = ${body.session_code || null} WHERE id = ${id} AND user_email = ${session.email}`;
   }
+  if (body.mode_type !== undefined) {
+    await sql`UPDATE meetings SET mode_type = ${body.mode_type || 'meeting'} WHERE id = ${id} AND user_email = ${session.email}`;
+  }
 
   return NextResponse.json({ ok: true });
 }

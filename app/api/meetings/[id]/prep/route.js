@@ -13,7 +13,7 @@ export async function GET(request, { params }) {
   const sql = getSql();
 
   const [meeting] = await sql`
-    SELECT id, title, objective, language_mode, context_notes, started_at, ended_at
+    SELECT id, title, objective, language_mode, mode_type, context_notes, started_at, ended_at
     FROM meetings
     WHERE id = ${id} AND user_email = ${session.email}
   `;

@@ -143,6 +143,8 @@ try {
   // Session 14 P2: link session code to meeting for engine ownership validation
   await sql`ALTER TABLE meetings ADD COLUMN IF NOT EXISTS session_code text`;
   await sql`CREATE INDEX IF NOT EXISTS idx_meetings_session_code ON meetings (session_code)`;
+  // Wave 5 m1: session mode/type framework (meeting | interview | customer_service)
+  await sql`ALTER TABLE meetings ADD COLUMN IF NOT EXISTS mode_type text NOT NULL DEFAULT 'meeting'`;
   console.log('[migrate] ok');
 } catch (e) {
   // Permission denied = local env has a read-only DATABASE_URL.
