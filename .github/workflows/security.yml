@@ -1,0 +1,59 @@
+name: Security
+
+# Supply-chain + secret scanning gate (security framework F8).
+# Runs on every pull request and on pushes to main. Fails the run on any
+# high/critical dependency vulnerability or any detected secret.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Dependency vulnerability audit (fail on high/critical) ──────────────────
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Audit web app dependencies (fail on high)
+        run: npm audit --audit-level=high
+      - name: Audit worker dependencies (fail on high)
+        working-directory: worker
+        run: npm audit --audit-level=high
+
+  # ── Secret scanning (fail on any detected secret) ───────────────────────────
+  # Uses the gitleaks binary directly (no GitHub-org licence requirement, unlike
+  # the action wrapper). Scans the full git history; --exit-code 1 fails the job.
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks
+        run: |
+          VERSION=8.18.4
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+      - name: Scan for secrets (fail on any finding)
+        run: gitleaks detect --source . --redact --no-banner --exit-code 1
+
+  # ── Keyless security tests (retention hard-delete + IDOR isolation) ─────────
+  security-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Retention + hard-delete proof
+        run: node scripts/test-retention.mjs
+      - name: Cross-account (IDOR) isolation proof
+        run: node scripts/test-idor.mjs
