@@ -1,0 +1,48 @@
+name: security-scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '0 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: npm audit (root, worker, helper)
+        run: |
+          set +e
+          for dir in . worker helper; do
+            if [ -f "$dir/package.json" ]; then
+              echo "::group::npm audit ($dir)"
+              (cd "$dir" && npm audit --audit-level=high)
+              rc=$?
+              echo "::endgroup::"
+              if [ "$rc" -ne 0 ]; then
+                echo "::warning title=npm audit::high/critical advisories or no lockfile in '$dir' (rc=$rc)"
+              fi
+            fi
+          done
+          # Non-blocking for now: advisories surface as warnings. Flip to exit on rc!=0 once clean.
+          exit 0
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
