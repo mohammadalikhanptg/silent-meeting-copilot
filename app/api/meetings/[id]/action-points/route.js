@@ -56,7 +56,7 @@ export async function GET(request, { params }) {
   try {
     const res = await fetch(`${ENGINE_URL}/action-points`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.INTERNAL_SHARED_SECRET || process.env.HELPER_SIGNING_SECRET || ''}` },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.INTERNAL_SHARED_SECRET || ''}` },
       body: JSON.stringify({
         me, others,
         title: meeting.title || 'Untitled session',

@@ -193,17 +193,71 @@ export async function getPrePayload() {
   return p;
 }
 
-// ── Helper pairing key ────────────────────────────────────────────────────────
-
-function helperSigningSecret() {
-  const s = process.env.HELPER_SIGNING_SECRET;
-  if (!s) throw new Error('HELPER_SIGNING_SECRET not configured');
-  return s;
+// ── Token/key signing keyring (kid-based, rotatable) ──────────────────────────
+// Signed tokens (engine session tokens) and helper pairing keys carry a key id
+// (kid) so signing keys can be rotated without a flag day: sign new material with
+// the active key, keep verifying old material with retired keys until all old
+// tokens/keys have aged out (engine tokens: ~15 min; helper keys: until the next
+// version bump), then drop the retired key.
+//
+// Configuration (explicit only — there is no implicit/default secret):
+//   TOKEN_SIGNING_KEYS        "kid1:secret1,kid2:secret2"  (comma-separated pairs)
+//   TOKEN_SIGNING_ACTIVE_KID  the kid to sign new material with
+// Bootstrap fallback (until ops sets the above): the existing HELPER_SIGNING_SECRET
+// is used as a single key under kid "k1". This is still explicit configuration,
+// not a hardcoded default, and lets the deployed system keep working pre-rotation.
+function signingKeyring() {
+  const raw = (process.env.TOKEN_SIGNING_KEYS || '').trim();
+  const keys = {};
+  if (raw) {
+    for (const pair of raw.split(',')) {
+      const idx = pair.indexOf(':');
+      if (idx < 1) continue;
+      const kid = pair.slice(0, idx).trim();
+      const secret = pair.slice(idx + 1).trim();
+      if (kid && secret) keys[kid] = secret;
+    }
+  }
+  let activeKid = (process.env.TOKEN_SIGNING_ACTIVE_KID || '').trim();
+  if (Object.keys(keys).length === 0) {
+    // Bootstrap from the legacy signing secret.
+    const legacy = process.env.HELPER_SIGNING_SECRET;
+    if (!legacy) throw new Error('No signing keys configured (set TOKEN_SIGNING_KEYS or HELPER_SIGNING_SECRET)');
+    keys.k1 = legacy;
+    activeKid = 'k1';
+  }
+  if (!activeKid || !keys[activeKid]) {
+    // Default the active key to the first configured kid if not named/invalid.
+    activeKid = Object.keys(keys)[0];
+  }
+  return { keys, activeKid };
 }
 
+function signingSecretForKid(kid) {
+  const { keys, activeKid } = signingKeyring();
+  // No kid (legacy material minted before this change) → verify with the active
+  // key, which during bootstrap is the same HELPER_SIGNING_SECRET old material used.
+  const useKid = kid || activeKid;
+  return keys[useKid] || null;
+}
+
+function hmacSign(data, secret) {
+  return crypto.createHmac('sha256', secret).update(data).digest('base64url');
+}
+
+function timingEq(aStr, bStr) {
+  const a = Buffer.from(aStr);
+  const b = Buffer.from(bStr);
+  if (a.length !== b.length) return false;
+  try { return crypto.timingSafeEqual(a, b); } catch { return false; }
+}
+
+// ── Helper pairing key ────────────────────────────────────────────────────────
+
 export function generateHelperKey(email, version) {
-  const payload = Buffer.from(JSON.stringify({ u: email, v: version })).toString('base64url');
-  const sig = crypto.createHmac('sha256', helperSigningSecret()).update(payload).digest('base64url');
+  const { activeKid } = signingKeyring();
+  const payload = Buffer.from(JSON.stringify({ u: email, v: version, kid: activeKid })).toString('base64url');
+  const sig = hmacSign(payload, signingSecretForKid(activeKid));
   return `smc1_${payload}.${sig}`;
 }
 
@@ -217,7 +271,7 @@ export function decodeHelperKey(key) {
   try {
     const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
     if (!parsed.u || parsed.v === undefined) return null;
-    return { payload, sig, email: parsed.u, version: parsed.v };
+    return { payload, sig, email: parsed.u, version: parsed.v, kid: parsed.kid || null };
   } catch {
     return null;
   }
@@ -226,15 +280,10 @@ export function decodeHelperKey(key) {
 export function verifyHelperKeyHmac(key) {
   const decoded = decodeHelperKey(key);
   if (!decoded) return null;
-  const expected = crypto.createHmac('sha256', helperSigningSecret()).update(decoded.payload).digest('base64url');
-  const a = Buffer.from(decoded.sig);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return null;
-  try {
-    if (!crypto.timingSafeEqual(a, b)) return null;
-  } catch {
-    return null;
-  }
+  const secret = signingSecretForKid(decoded.kid);
+  if (!secret) return null; // unknown kid → reject
+  const expected = hmacSign(decoded.payload, secret);
+  if (!timingEq(decoded.sig, expected)) return null;
   return decoded;
 }
 
@@ -242,19 +291,25 @@ export function verifyHelperKeyHmac(key) {
 // Short-lived, HMAC-signed token issued to a logged-in user so the browser can
 // authenticate directly to the Cloudflare engine WS (which routes by email).
 // Default TTL is short (15 min); the browser refreshes via POST /api/session/start.
-export function generateSessionToken(email, ttlSec = 15 * 60) {
+// H4: the token is bound to the issuing app session (sid). Validation
+// (validate-session-token) checks that session for revocation/expiry and records
+// the jti as single-use for the WebSocket-upgrade path (replay protection).
+export function generateSessionToken(email, sid, ttlSec = 15 * 60) {
   const now = Math.floor(Date.now() / 1000);
+  const { activeKid } = signingKeyring();
   const payload = Buffer.from(
     JSON.stringify({
       u: email,
+      sid: sid || null,
       typ: 'engine-ws',
       aud: 'smc-engine',
+      kid: activeKid,
       iat: now,
       exp: now + ttlSec,
-      jti: crypto.randomBytes(9).toString('base64url'),
+      jti: crypto.randomBytes(12).toString('base64url'),
     })
   ).toString('base64url');
-  const sig = crypto.createHmac('sha256', helperSigningSecret()).update(payload).digest('base64url');
+  const sig = hmacSign(payload, signingSecretForKid(activeKid));
   return `smcs1_${payload}.${sig}`;
 }
 
@@ -265,48 +320,35 @@ export function verifySessionToken(token) {
   if (dot < 1) return null;
   const payload = rest.slice(0, dot);
   const sig = rest.slice(dot + 1);
-  const expected = crypto.createHmac('sha256', helperSigningSecret()).update(payload).digest('base64url');
-  const a = Buffer.from(sig);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return null;
-  try { if (!crypto.timingSafeEqual(a, b)) return null; } catch { return null; }
+  let parsed;
   try {
-    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-    if (!parsed.u || !parsed.exp) return null;
-    if (parsed.exp < Math.floor(Date.now() / 1000)) return null;
-    if (parsed.typ && parsed.typ !== 'engine-ws') return null;
-    if (parsed.aud && parsed.aud !== 'smc-engine') return null;
-    return { email: parsed.u, exp: parsed.exp, jti: parsed.jti || null, aud: parsed.aud || null };
+    parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
   } catch {
     return null;
   }
+  const secret = signingSecretForKid(parsed.kid);
+  if (!secret) return null; // unknown kid → reject
+  const expected = hmacSign(payload, secret);
+  if (!timingEq(sig, expected)) return null;
+  if (!parsed.u || !parsed.exp) return null;
+  if (parsed.exp < Math.floor(Date.now() / 1000)) return null;
+  if (parsed.typ && parsed.typ !== 'engine-ws') return null;
+  if (parsed.aud && parsed.aud !== 'smc-engine') return null;
+  return { email: parsed.u, sid: parsed.sid || null, exp: parsed.exp, jti: parsed.jti || null, aud: parsed.aud || null };
 }
 
 // ── Internal service auth (worker <-> app) ────────────────────────────────────
 // The Cloudflare engine authenticates to the app /api/internal/* routes with a
 // dedicated shared secret (INTERNAL_SHARED_SECRET), kept SEPARATE from the
 // key/token signing secret so rotating the transport secret never invalidates
-// issued pairing keys or browser tokens. During migration the previous
-// HELPER_SIGNING_SECRET is still accepted as a fallback; drop it once the engine
-// is confirmed sending INTERNAL_SHARED_SECRET.
-function internalBearerSecrets() {
-  const out = [];
-  if (process.env.INTERNAL_SHARED_SECRET) out.push(process.env.INTERNAL_SHARED_SECRET);
-  if (process.env.HELPER_SIGNING_SECRET) out.push(process.env.HELPER_SIGNING_SECRET);
-  return out;
-}
-
+// issued pairing keys or browser tokens. (H3) The HELPER_SIGNING_SECRET
+// internal-bearer fallback has been removed — only INTERNAL_SHARED_SECRET is
+// accepted as the transport bearer, so the transport and signing secrets are no
+// longer coupled.
 // Returns 'ok' | 'misconfig' | 'unauthorized'.
 export function checkInternalBearer(authHeader) {
-  const secrets = internalBearerSecrets();
-  if (secrets.length === 0) return 'misconfig';
+  const secret = process.env.INTERNAL_SHARED_SECRET;
+  if (!secret) return 'misconfig';
   const provided = (authHeader || '').startsWith('Bearer ') ? authHeader.slice(7) : '';
-  const a = Buffer.from(provided);
-  for (const s of secrets) {
-    const b = Buffer.from(s);
-    if (a.length === b.length) {
-      try { if (crypto.timingSafeEqual(a, b)) return 'ok'; } catch (_) {}
-    }
-  }
-  return 'unauthorized';
+  return timingEq(provided, secret) ? 'ok' : 'unauthorized';
 }

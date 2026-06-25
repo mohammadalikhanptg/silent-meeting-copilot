@@ -179,7 +179,8 @@ console.log('\nTest 8: Profile route — internal/validate-helper-key route stru
 console.log('\nTest 9: Worker WS handler — pairing key gating (source check)');
 {
   const src = readFileSync(join(__dir, '..', 'worker/src/index.js'), 'utf8');
-  assert('worker: reads ?key param on WS connect', src.includes("searchParams.get('key')"));
+  assert('worker: reads pairing key from WS subprotocol (H2 — not the URL)', src.includes("extractProtoValue(protos, 'smc.key.')"));
+  assert('worker: no longer reads key from the URL query', !src.includes("searchParams.get('key')"));
   assert('worker: calls validateHelperKey', src.includes('validateHelperKey'));
   assert('worker: closes WS on auth failure (code 4401)', src.includes('4401'));
   assert('worker: sends auth_error message', src.includes('auth_error'));

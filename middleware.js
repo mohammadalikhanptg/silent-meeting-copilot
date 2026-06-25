@@ -48,19 +48,68 @@ function isCsrfSafe(req) {
   return false; // no origin or referer — reject
 }
 
+// ── Content-Security-Policy (strict, nonce-based) ─────────────────────────────
+// A fresh nonce is minted per request and attached to the inline theme-bootstrap
+// script (the only inline script) and to Next.js's own scripts (Next propagates
+// the nonce it finds in the request CSP header). 'strict-dynamic' lets nonced
+// scripts load their chunks while ignoring host allowlists, so no 'unsafe-inline'
+// is needed for scripts. style-src keeps 'unsafe-inline' only because the UI uses
+// React inline style attributes throughout (not nonceable); no inline scripts
+// rely on it. connect-src is locked to self + the engine (HTTPS + WSS).
+const ENGINE_ORIGIN = process.env.NEXT_PUBLIC_ENGINE_URL || 'https://smc-engine.ali-6b8.workers.dev';
+const WS_ENGINE_ORIGIN = ENGINE_ORIGIN.replace(/^http/, 'ws');
+
+function buildCsp(nonce) {
+  return [
+    "default-src 'self'",
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self'",
+    `connect-src 'self' ${ENGINE_ORIGIN} ${WS_ENGINE_ORIGIN}`,
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+    'upgrade-insecure-requests',
+  ].join('; ');
+}
+
+function newNonce() {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+
 export async function middleware(req) {
   const { pathname } = req.nextUrl;
   const isPublic = PUBLIC.some((p) => pathname === p || pathname.startsWith(p));
+
+  const nonce = newNonce();
+  const csp = buildCsp(nonce);
 
   // CSRF: reject state-changing requests whose Origin/Referer doesn't match the app host
   if (!isCsrfSafe(req)) {
     return new NextResponse(JSON.stringify({ error: 'forbidden' }), {
       status: 403,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Content-Security-Policy': csp },
     });
   }
 
-  if (isPublic) return NextResponse.next();
+  // Forward the nonce + CSP on the request so Next.js nonces its own scripts and
+  // the root layout can read the nonce for the inline theme script.
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.set('x-nonce', nonce);
+  requestHeaders.set('Content-Security-Policy', csp);
+
+  const ok = () => {
+    const res = NextResponse.next({ request: { headers: requestHeaders } });
+    res.headers.set('Content-Security-Policy', csp);
+    return res;
+  };
+
+  if (isPublic) return ok();
 
   // Session auth: fast cookie signature + expiry check (DB row check happens in server routes)
   const token = req.cookies.get('smc_session')?.value;
@@ -70,9 +119,11 @@ export async function middleware(req) {
     const url = req.nextUrl.clone();
     url.pathname = '/login';
     url.search = '';
-    return NextResponse.redirect(url);
+    const res = NextResponse.redirect(url);
+    res.headers.set('Content-Security-Policy', csp);
+    return res;
   }
-  return NextResponse.next();
+  return ok();
 }
 
 export const config = {

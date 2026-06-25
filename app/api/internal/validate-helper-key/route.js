@@ -4,18 +4,18 @@ import { getSql } from '../../../lib/db';
 
 export const dynamic = 'force-dynamic';
 
-// GET /api/internal/validate-helper-key?key=smc1_xxx.yyy&session_code=abc-1234
+// GET /api/internal/validate-helper-key
 // Called by the Cloudflare worker to validate a helper pairing key.
-// Auth: Authorization: Bearer INTERNAL_SHARED_SECRET (HELPER_SIGNING_SECRET accepted during migration)
+// Auth: Authorization: Bearer INTERNAL_SHARED_SECRET   (H3 — no fallback)
+// Key:  X-Helper-Key header; optional X-Session-Code    (H2 — never in the URL)
 export async function GET(request) {
   const authHeader = request.headers.get('Authorization') || '';
   const auth = checkInternalBearer(authHeader);
   if (auth === 'misconfig') return NextResponse.json({ valid: false, reason: 'server misconfigured' }, { status: 500 });
   if (auth !== 'ok') return NextResponse.json({ valid: false, reason: 'unauthorized' }, { status: 401 });
 
-  const url = new URL(request.url);
-  const key = url.searchParams.get('key') || '';
-  const sessionCode = url.searchParams.get('session_code') || '';
+  const key = request.headers.get('X-Helper-Key') || '';
+  const sessionCode = request.headers.get('X-Session-Code') || '';
 
   if (!key) return NextResponse.json({ valid: false, reason: 'missing key' }, { status: 400 });
 

@@ -11,23 +11,47 @@ function ctEq(a, b) {
 
 // POST-endpoint auth: accept the internal service secret (server-to-server) or a valid
 // short-lived browser engine token. Keeps the stateless generation endpoints non-public.
+// (H3) Only INTERNAL_SHARED_SECRET is accepted as the service bearer — the
+// HELPER_SIGNING_SECRET fallback has been removed. The session-token path here is
+// non-consuming (POST endpoints may be called repeatedly within the token TTL);
+// single-use replay protection applies only to the WebSocket-upgrade path.
 async function requirePostAuth(request, env) {
   const auth = request.headers.get('Authorization') || '';
   const bearer = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   if (!bearer) return { ok: false };
-  if ((env.INTERNAL_SHARED_SECRET && ctEq(bearer, env.INTERNAL_SHARED_SECRET)) ||
-      (env.HELPER_SIGNING_SECRET && ctEq(bearer, env.HELPER_SIGNING_SECRET))) {
+  if (env.INTERNAL_SHARED_SECRET && ctEq(bearer, env.INTERNAL_SHARED_SECRET)) {
     return { ok: true, svc: true };
   }
-  const v = await validateSessionToken(bearer, env);
+  const v = await validateSessionToken(bearer, env, { consume: false });
   if (v && v.valid) return { ok: true, email: v.email };
   return { ok: false };
+}
+
+// ── WebSocket subprotocol token carriage (H2) ─────────────────────────────────
+// Browsers/Electron cannot set headers on a WebSocket handshake, so auth tokens
+// travel in Sec-WebSocket-Protocol (never the URL). The client offers two
+// subprotocols: the marker "smc.v1" plus a value entry "smc.token.<token>" or
+// "smc.key.<key>". The engine reads the value entry and echoes only the marker,
+// so the secret is never reflected back in a response header.
+function offeredProtocols(request) {
+  const h = request.headers.get('Sec-WebSocket-Protocol') || '';
+  return h.split(',').map((s) => s.trim()).filter(Boolean);
+}
+function extractProtoValue(protos, prefix) {
+  for (const p of protos) if (p.startsWith(prefix)) return p.slice(prefix.length);
+  return null;
+}
+function echoProto(protos) {
+  return protos.includes('smc.v1') ? 'smc.v1' : null;
 }
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  // Engine responses are JSON/data, never documents; lock them down anyway (CSP).
+  'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+  'X-Content-Type-Options': 'nosniff',
 };
 
 function cors(body, status = 200, extra = {}) {
@@ -41,17 +65,18 @@ function json(obj, status = 200) {
 // Validate a helper pairing key by calling the Next.js internal endpoint.
 // Returns {valid: true, email} or {valid: false, reason}.
 async function validateHelperKey(key, sessionCode, env) {
-  const secret = env.INTERNAL_SHARED_SECRET || env.HELPER_SIGNING_SECRET;
+  const secret = env.INTERNAL_SHARED_SECRET;
   if (!secret) return { valid: false, reason: 'server misconfigured' };
+  if (!key) return { valid: false, reason: 'missing key' };
 
   const appUrl = env.APP_BASE_URL || 'https://silent-meeting-copilot.vercel.app';
-  const validateUrl = new URL(`${appUrl}/api/internal/validate-helper-key`);
-  validateUrl.searchParams.set('key', key);
-  if (sessionCode) validateUrl.searchParams.set('session_code', sessionCode);
+  // (H2) Carry the pairing key and session code in headers, not the URL query.
+  const headers = { Authorization: `Bearer ${secret}`, 'X-Helper-Key': key };
+  if (sessionCode) headers['X-Session-Code'] = sessionCode;
 
   try {
-    const res = await fetch(validateUrl.toString(), {
-      headers: { Authorization: `Bearer ${secret}` },
+    const res = await fetch(`${appUrl}/api/internal/validate-helper-key`, {
+      headers,
       cf: { cacheTtl: 0 },
     });
     if (!res.ok) {
@@ -67,16 +92,19 @@ async function validateHelperKey(key, sessionCode, env) {
 }
 
 // Validate a browser session token (issued by the app to a logged-in user).
-async function validateSessionToken(token, env) {
-  const secret = env.INTERNAL_SHARED_SECRET || env.HELPER_SIGNING_SECRET;
+// opts.consume=true records the token's jti as single-use (replay protection for
+// the WebSocket-upgrade path); the POST path validates without consuming.
+async function validateSessionToken(token, env, opts = {}) {
+  const secret = env.INTERNAL_SHARED_SECRET;
   if (!secret) return { valid: false, reason: 'server misconfigured' };
   if (!token) return { valid: false, reason: 'missing token' };
   const appUrl = env.APP_BASE_URL || 'https://silent-meeting-copilot.vercel.app';
-  const validateUrl = new URL(`${appUrl}/api/internal/validate-session-token`);
-  validateUrl.searchParams.set('token', token);
+  // (H2) Carry the token in a header, not the URL query.
+  const headers = { Authorization: `Bearer ${secret}`, 'X-Session-Token': token };
+  if (opts.consume) headers['X-Consume'] = '1';
   try {
-    const res = await fetch(validateUrl.toString(), {
-      headers: { Authorization: `Bearer ${secret}` },
+    const res = await fetch(`${appUrl}/api/internal/validate-session-token`, {
+      headers,
       cf: { cacheTtl: 0 },
     });
     if (!res.ok) {
@@ -97,13 +125,16 @@ function userDoId(env, email) {
 }
 
 // Accept the socket only to deliver a clean auth_error, then close it.
-function wsAuthError(reason) {
+// Echo the marker subprotocol when offered so the browser completes the handshake
+// and actually receives the auth_error before the close.
+function wsAuthError(reason, echo) {
   const pair = new WebSocketPair();
   const [client, server] = Object.values(pair);
   server.accept();
   try { server.send(JSON.stringify({ type: 'auth_error', reason: reason || 'unauthorized' })); } catch (_) {}
   server.close(4401, reason || 'unauthorized');
-  return new Response(null, { status: 101, webSocket: client });
+  const headers = echo ? { 'Sec-WebSocket-Protocol': echo } : undefined;
+  return new Response(null, { status: 101, webSocket: client, headers });
 }
 
 export default {
@@ -225,10 +256,13 @@ export default {
       if (request.headers.get('Upgrade') !== 'websocket') {
         return json({ error: 'Expected WebSocket upgrade' }, 426);
       }
-      const key = url.searchParams.get('key');
+      const protos = offeredProtocols(request);
+      // (H2) pairing key arrives in the subprotocol, not the URL query.
+      const key = extractProtoValue(protos, 'smc.key.');
       const v = await validateHelperKey(key, null, env);
-      if (!v.valid) return wsAuthError(v.reason);
+      if (!v.valid) return wsAuthError(v.reason, echoProto(protos));
       const authedUrl = new URL(request.url);
+      authedUrl.searchParams.delete('key');
       authedUrl.searchParams.set('role', 'helper');
       authedUrl.searchParams.set('_authed_email', v.email);
       const stub = env.SESSIONS.get(userDoId(env, v.email));
@@ -241,10 +275,15 @@ export default {
       if (request.headers.get('Upgrade') !== 'websocket') {
         return json({ error: 'Expected WebSocket upgrade' }, 426);
       }
-      const token = url.searchParams.get('token');
-      const v = await validateSessionToken(token, env);
-      if (!v.valid) return wsAuthError(v.reason);
+      const protos = offeredProtocols(request);
+      // (H2) session token arrives in the subprotocol, not the URL query.
+      // (H4) consume=true → the app records this token's jti as single-use, so a
+      // captured token cannot re-open the capture channel.
+      const token = extractProtoValue(protos, 'smc.token.');
+      const v = await validateSessionToken(token, env, { consume: true });
+      if (!v.valid) return wsAuthError(v.reason, echoProto(protos));
       const authedUrl = new URL(request.url);
+      authedUrl.searchParams.delete('token');
       authedUrl.searchParams.set('role', 'browser');
       authedUrl.searchParams.set('_authed_email', v.email);
       const stub = env.SESSIONS.get(userDoId(env, v.email));

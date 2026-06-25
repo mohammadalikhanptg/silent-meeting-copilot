@@ -147,6 +147,17 @@ try {
   await sql`CREATE INDEX IF NOT EXISTS idx_meetings_session_code ON meetings (session_code)`;
   // Wave 5 m1: session mode/type framework (meeting | interview | customer_service)
   await sql`ALTER TABLE meetings ADD COLUMN IF NOT EXISTS mode_type text NOT NULL DEFAULT 'meeting'`;
+  // Security hardening H4: single-use jti ledger for engine WS tokens (replay
+  // protection). A jti is recorded on the consuming WebSocket-upgrade path and
+  // rejected on reuse. Rows are pruned once the token they record has expired.
+  await sql`CREATE TABLE IF NOT EXISTS used_engine_tokens (
+    jti     text PRIMARY KEY,
+    sid     uuid,
+    email   text,
+    exp     timestamptz,
+    used_at timestamptz NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_used_engine_tokens_exp ON used_engine_tokens (exp)`;
   console.log('[migrate] ok');
 } catch (e) {
   // Permission denied = local env has a read-only DATABASE_URL.

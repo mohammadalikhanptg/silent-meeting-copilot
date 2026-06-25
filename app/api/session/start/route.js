@@ -9,9 +9,11 @@ export const dynamic = 'force-dynamic';
 // no session code is needed anywhere.
 export async function POST() {
   const session = await getSessionPayload();
-  if (!session?.email) {
+  if (!session?.email || !session?.sid) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
-  const token = generateSessionToken(session.email);
+  // H4 — bind the engine token to this app session id so it dies when the session
+  // is revoked/expires, and carries a jti the engine consumes as single-use.
+  const token = generateSessionToken(session.email, session.sid);
   return NextResponse.json({ token });
 }

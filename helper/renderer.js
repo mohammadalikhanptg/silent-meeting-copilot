@@ -110,11 +110,12 @@ function connect() {
     return;
   }
   setState('connecting');
-  const qs = new URLSearchParams({ role: 'helper', key: pairingKey, device: deviceId });
+  const qs = new URLSearchParams({ role: 'helper', device: deviceId });
   const wsUrl = engineUrl.replace(/^http/, 'ws') + `/helper/ws?${qs}`;
   log('Connecting to engine…');
   try {
-    ws = new WebSocket(wsUrl);
+    // H2: carry the pairing key in the WebSocket subprotocol, never the URL.
+    ws = new WebSocket(wsUrl, ['smc.v1', `smc.key.${pairingKey}`]);
   } catch (e) {
     log('Connect failed: ' + e.message);
     scheduleReconnect();

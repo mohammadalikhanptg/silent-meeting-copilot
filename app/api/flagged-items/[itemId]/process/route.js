@@ -43,7 +43,7 @@ export async function POST(request, { params }) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${process.env.INTERNAL_SHARED_SECRET || process.env.HELPER_SIGNING_SECRET || ''}`,
+        Authorization: `Bearer ${process.env.INTERNAL_SHARED_SECRET || ''}`,
       },
       body: JSON.stringify({
         text: item.text,

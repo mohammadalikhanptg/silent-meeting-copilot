@@ -644,11 +644,12 @@ export default function SessionPage() {
           try { wsRef.current.close(); } catch (_) {}
         }
 
-        const qs = new URLSearchParams({ mode: sessionMode, role: 'browser', token: tokenRef.current || '' });
+        const qs = new URLSearchParams({ mode: sessionMode, role: 'browser' });
         const langHint = MODE_LANG[sessionMode];
         if (langHint) qs.set('lang', langHint);
         const wsUrl = ENGINE_URL.replace(/^http/, 'ws') + `/app/ws?${qs}`;
-        const ws = new WebSocket(wsUrl);
+        // H2: carry the engine token in the WebSocket subprotocol, never the URL.
+        const ws = new WebSocket(wsUrl, ['smc.v1', `smc.token.${tokenRef.current || ''}`]);
         wsRef.current = ws;
         let settled = false;
 
@@ -834,10 +835,11 @@ export default function SessionPage() {
     (async () => {
       try { await getEngineToken(); } catch (_) { return; }
       if (cancelled) return;
-      const qs = new URLSearchParams({ mode, role: 'browser', token: tokenRef.current || '' });
+      const qs = new URLSearchParams({ mode, role: 'browser' });
       const langHint = MODE_LANG[mode];
       if (langHint) qs.set('lang', langHint);
-      try { ws = new WebSocket(ENGINE_URL.replace(/^http/, 'ws') + `/app/ws?${qs}`); } catch (_) { return; }
+      // H2: carry the engine token in the WebSocket subprotocol, never the URL.
+      try { ws = new WebSocket(ENGINE_URL.replace(/^http/, 'ws') + `/app/ws?${qs}`, ['smc.v1', `smc.token.${tokenRef.current || ''}`]); } catch (_) { return; }
       monitorWsRef.current = ws;
       ws.onmessage = (evt) => {
         try {
