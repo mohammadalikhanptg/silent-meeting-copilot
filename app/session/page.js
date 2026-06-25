@@ -1413,47 +1413,47 @@ export default function SessionPage() {
               </div>
 
               <div style={{ ...styles.followUpPanel, borderColor: '#1e3a5f' }}>
-                <div style={{ ...styles.followUpPanelHead, color: '#60a5fa' }}>References</div>
+                <div style={{ ...styles.followUpPanelHead, color: '#60a5fa' }}>Research</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {flaggedItems.map((item, idx) => (
-                    <div
-                      key={item.id || idx}
-                      style={{
-                        ...styles.refItem,
-                        opacity: item.addressed ? 0.45 : 1,
-                      }}
-                    >
-                      <div style={styles.tpNumber}>{idx + 1}</div>
-                      <div style={{ flex: 1 }}>
-                        {item.status === 'pending' || item.status === 'processing' ? (
-                          <div style={styles.tpWorking}>
-                            <span style={styles.workingDot} />
-                            Looking up references…
-                          </div>
-                        ) : item.references && item.references.length > 0 ? (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                            {item.references.map((r, ri) => (
-                              <div key={ri} style={styles.refResult}>
-                                <a href={r.url} target="_blank" rel="noreferrer" style={styles.refTitle}>{r.title}</a>
-                                {r.snippet && <div style={styles.refSnippet}>{r.snippet}</div>}
-                              </div>
-                            ))}
-                          </div>
-                        ) : item.status === 'enriched' || item.status === 'addressed' ? (
-                          <div style={{ fontSize: 12, color: '#4b5563', fontStyle: 'italic' }}>
-                            No references found. Try:{' '}
-                            <a
-                              href={`https://www.google.com/search?q=${encodeURIComponent(item.text.slice(0, 60))}`}
-                              target="_blank" rel="noreferrer"
-                              style={{ color: '#60a5fa' }}
-                            >
-                              Search Google
-                            </a>
-                          </div>
-                        ) : null}
+                  {flaggedItems.map((item, idx) => {
+                    const q = encodeURIComponent((item.text || '').trim().slice(0, 120));
+                    const links = [
+                      { label: 'Web', url: `https://www.google.com/search?q=${q}` },
+                      { label: 'News', url: `https://news.google.com/search?q=${q}` },
+                      { label: 'LinkedIn', url: `https://www.linkedin.com/search/results/all/?keywords=${q}` },
+                    ];
+                    const working = item.status === 'pending' || item.status === 'processing';
+                    const hasRefs = item.references && item.references.length > 0;
+                    return (
+                      <div key={item.id || idx} style={{ ...styles.refItem, opacity: item.addressed ? 0.45 : 1 }}>
+                        <div style={styles.tpNumber}>{idx + 1}</div>
+                        <div style={{ flex: 1 }}>
+                          {hasRefs && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 8 }}>
+                              {item.references.map((r, ri) => (
+                                <div key={ri} style={styles.refResult}>
+                                  <a href={r.url} target="_blank" rel="noreferrer" style={styles.refTitle}>{r.title}</a>
+                                  {r.snippet && <div style={styles.refSnippet}>{r.snippet}</div>}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {working ? (
+                            <div style={styles.tpWorking}>
+                              <span style={styles.workingDot} />
+                              Researching…
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                              {links.map((l) => (
+                                <a key={l.label} href={l.url} target="_blank" rel="noreferrer" style={styles.researchLink}>{l.label} ↗</a>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -1596,6 +1596,7 @@ const styles = {
   refResult: { background: 'var(--others-bg)', border: '1px solid var(--others-border)', borderRadius: 6, padding: '8px 10px' },
   refTitle: { fontSize: 12, color: 'var(--others)', textDecoration: 'none', display: 'block', marginBottom: 2, wordBreak: 'break-word' },
   refSnippet: { fontSize: 11, color: 'var(--tx-3)', lineHeight: 1.4 },
+  researchLink: { fontSize: 11, color: 'var(--others)', textDecoration: 'none', border: '1px solid var(--others-border)', borderRadius: 6, padding: '2px 8px', background: 'var(--others-bg)' },
   foot: { fontSize: 11, color: 'var(--tx-3)', textAlign: 'center' },
   modalOverlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 },
   modalCard: { background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, maxWidth: 460, display: 'flex', flexDirection: 'column', gap: 14 },
