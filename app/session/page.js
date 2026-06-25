@@ -17,6 +17,10 @@ const ALLOWED_EXTENSIONS = ['.md', '.txt'];
 const MAX_FILE_BYTES = 256 * 1024; // 256 KB
 
 const MODE_LANG = { english: 'en', 'hindi-urdu': 'hi', auto: null };
+// Paragraph grouping: merge consecutive same-stream segments into one timestamped
+// paragraph; break on a clear pause or a long-run guardrail. Tunable.
+const PARA_PAUSE_MS = 4000;
+const PARA_MAX_MS = 60000;
 const MODE_LABEL = { english: 'English (fast)', 'hindi-urdu': 'Hindi / Urdu', auto: 'Auto-detect' };
 
 function generateShortCode() {
@@ -626,16 +630,16 @@ export default function SessionPage() {
               const msg = JSON.parse(evt.data);
               if (msg.type === 'transcript' && msg.raw) {
                 if (msg.speaker === 'others') {
-                  const line = {
-                    raw: msg.raw,
-                    cleaned: msg.cleaned || msg.raw,
-                    ts: new Date().toLocaleTimeString(),
-                    segmentId: null,
-                    corrected: null,
-                    clarifiedByMe: false,
-                    flagged: false,
-                  };
-                  setOthersLines(p => [...p.slice(-200), line]);
+                  const text = stripSpk(msg.cleaned || msg.raw);
+                  const nowMs = Date.now();
+                  setOthersLines(prev => {
+                    const last = prev[prev.length - 1];
+                    if (last && !last.flagged && !last.clarifiedByMe && nowMs - (last.tsMs || 0) <= PARA_PAUSE_MS && nowMs - (last.startMs || nowMs) <= PARA_MAX_MS) {
+                      const merged = { ...last, raw: `${last.raw} ${msg.raw || ''}`.trim(), cleaned: `${last.cleaned} ${text}`.trim(), tsMs: nowMs, segmentId: null };
+                      return [...prev.slice(0, -1), merged];
+                    }
+                    return [...prev.slice(-200), { raw: msg.raw, cleaned: text, ts: new Date().toLocaleTimeString(), tsMs: nowMs, startMs: nowMs, segmentId: null, corrected: null, clarifiedByMe: false, flagged: false }];
+                  });
 
                   if (meetingIdRef.current) {
                     const mId = meetingIdRef.current;
@@ -645,28 +649,34 @@ export default function SessionPage() {
                       body: JSON.stringify({
                         speaker: 'others',
                         raw: msg.raw,
-                        cleaned: line.cleaned,
+                        cleaned: text,
                         lang: MODE_LANG[sessionMode] || null,
                       }),
                     })
                       .then(r => r.json())
                       .then(d => {
                         if (d.segmentId) {
-                          setOthersLines(prev =>
-                            prev.map(l => l === line ? { ...l, segmentId: d.segmentId } : l)
-                          );
+                          setOthersLines(prev => {
+                            if (!prev.length) return prev;
+                            const copy = [...prev];
+                            copy[copy.length - 1] = { ...copy[copy.length - 1], segmentId: d.segmentId };
+                            return copy;
+                          });
                         }
                       })
                       .catch(() => {});
                   }
                 } else {
-                  const line = {
-                    raw: msg.raw,
-                    cleaned: msg.cleaned || msg.raw,
-                    ts: new Date().toLocaleTimeString(),
-                    flagged: false,
-                  };
-                  setMeLines(p => [...p.slice(-200), line]);
+                  const text = stripSpk(msg.cleaned || msg.raw);
+                  const nowMs = Date.now();
+                  setMeLines(prev => {
+                    const last = prev[prev.length - 1];
+                    if (last && !last.flagged && nowMs - (last.tsMs || 0) <= PARA_PAUSE_MS && nowMs - (last.startMs || nowMs) <= PARA_MAX_MS) {
+                      const merged = { ...last, raw: `${last.raw} ${msg.raw || ''}`.trim(), cleaned: `${last.cleaned} ${text}`.trim(), tsMs: nowMs };
+                      return [...prev.slice(0, -1), merged];
+                    }
+                    return [...prev.slice(-200), { raw: msg.raw, cleaned: text, ts: new Date().toLocaleTimeString(), tsMs: nowMs, startMs: nowMs, flagged: false }];
+                  });
                   if (meetingIdRef.current) {
                     const mId = meetingIdRef.current;
                     fetch(`/api/meetings/${mId}/segments`, {
@@ -675,7 +685,7 @@ export default function SessionPage() {
                       body: JSON.stringify({
                         speaker: 'me',
                         raw: msg.raw,
-                        cleaned: msg.cleaned || msg.raw,
+                        cleaned: text,
                         lang: MODE_LANG[sessionMode] || null,
                       }),
                     }).catch(() => {});
