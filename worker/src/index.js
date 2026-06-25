@@ -1,4 +1,4 @@
-import { SessionDO, transcribeAndClean, generateCoaching, enrichFlaggedItem, generateMinutes, generateActionPoints } from './session-do.js';
+import { SessionDO, transcribeAndClean, generateCoaching, enrichFlaggedItem, generateMinutes, generateActionPoints, generateInterviewAssessment } from './session-do.js';
 
 export { SessionDO };
 
@@ -168,6 +168,19 @@ export default {
         return json({ ok: true, ...result });
       } catch (err) {
         console.error('Action points error:', err);
+        return json({ error: String(err) }, 500);
+      }
+    }
+
+    // POST /interview-assessment — post-session interview evidence review + three-state signal
+    // Body: {me, others, title, date, objective?, contextNotes?, candidateName?, refDocs?}
+    if (url.pathname === '/interview-assessment' && request.method === 'POST') {
+      try {
+        const body = await request.json();
+        const result = await generateInterviewAssessment(body, env);
+        return json({ ok: true, ...result });
+      } catch (err) {
+        console.error('Interview assessment error:', err);
         return json({ error: String(err) }, 500);
       }
     }
