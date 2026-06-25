@@ -1046,7 +1046,7 @@ Return ONLY this JSON:
   try {
     const llmResult = await env.AI.run('@cf/meta/llama-3.2-3b-instruct', {
       messages: [
-        { role: 'system', content: 'You extract factual meeting action points. Return ONLY the JSON object, starting with { and ending with }.' },
+        { role: 'system', content: 'You extract factual meeting action points. Output ONLY raw JSON, no markdown, no code fences, no commentary, starting with { and ending with }.' },
         { role: 'user', content: prompt },
       ],
       max_tokens: 900,
@@ -1056,26 +1056,44 @@ Return ONLY this JSON:
     if (rawResponse && typeof rawResponse === 'object') {
       parsed = rawResponse;
     } else {
-      const responseText = (typeof rawResponse === 'string' ? rawResponse : '').trim();
-      if (responseText) {
-        try { const match = responseText.match(/\{[\s\S]*\}/); if (match) parsed = JSON.parse(match[0]); } catch (_) {}
+      let txt = (typeof rawResponse === 'string' ? rawResponse : '').trim();
+      txt = txt.replace(/```json/gi, '').replace(/```/g, '').trim();
+      if (txt) {
+        try { parsed = JSON.parse(txt); }
+        catch (_) {
+          try { const m = txt.match(/\{[\s\S]*\}/); if (m) parsed = JSON.parse(m[0]); } catch (_) {}
+        }
       }
     }
     if (!parsed) return { ...base, emptyState: false };
 
-    const clean = (arr, withWho) => Array.isArray(arr)
-      ? arr
-          .filter(a => a && typeof a === 'object' && a.action && String(a.action).trim())
-          .map(a => withWho
-            ? { who: String(a.who || 'Other participant').trim(), action: String(a.action).trim(), due: String(a.due || '').trim() }
-            : { action: String(a.action).trim(), due: String(a.due || '').trim() })
-      : [];
+    const norm = (a, withWho) => {
+      if (!a || typeof a !== 'object') return null;
+      const action = String(a.action || a.task || a.item || a.text || '').trim();
+      if (!action) return null;
+      const due = String(a.due || a.deadline || a.when || '').trim();
+      if (withWho) return { who: String(a.who || a.owner || a.name || a.person || 'Other participant').trim(), action, due };
+      return { action, due };
+    };
+    const cleanList = (arr, withWho) => Array.isArray(arr) ? arr.map(x => norm(x, withWho)).filter(Boolean) : [];
+
+    let speakerArr = parsed.speakerActions || parsed.speaker || (parsed.actions && parsed.actions.speaker) || [];
+    let othersArr = parsed.othersActions || parsed.others || (parsed.actions && parsed.actions.others) || [];
+    if ((!Array.isArray(speakerArr) || !speakerArr.length) && (!Array.isArray(othersArr) || !othersArr.length) && Array.isArray(parsed.actions)) {
+      speakerArr = []; othersArr = [];
+      const sName = (base.speakerName || '').toLowerCase();
+      for (const a of parsed.actions) {
+        const who = String((a && (a.who || a.owner || a.name)) || '').toLowerCase();
+        if (who && (who === 'me' || who === 'speaker' || (sName && who.includes(sName)) || (sName && sName.includes(who)))) speakerArr.push(a);
+        else othersArr.push(a);
+      }
+    }
 
     return {
       ...base,
       emptyState: false,
-      speakerActions: clean(parsed.speakerActions, false),
-      othersActions: clean(parsed.othersActions, true),
+      speakerActions: cleanList(speakerArr, false),
+      othersActions: cleanList(othersArr, true),
     };
   } catch (err) {
     return { ...base, emptyState: false, error: String(err.message || err) };
