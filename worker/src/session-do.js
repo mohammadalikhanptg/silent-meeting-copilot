@@ -23,6 +23,11 @@ export class SessionDO {
 
   async _handleWebSocket(request) {
     const url = new URL(request.url);
+    // Fail closed: the Worker injects _authed_email only after validating a session token
+    // (browser) or helper pairing key (helper). No marker means the request did not pass
+    // authentication, so reject the upgrade rather than defaulting to a browser role.
+    const authedEmail = url.searchParams.get('_authed_email');
+    if (!authedEmail) return new Response('unauthorized', { status: 401 });
     const lang = url.searchParams.get('lang') || null;
     const mode = url.searchParams.get('mode') || 'auto';
     const role = url.searchParams.get('role') === 'helper' ? 'helper' : 'browser';
@@ -225,7 +230,8 @@ export class SessionDO {
         this._broadcast({ type: 'transcript', speaker, ...result });
       }
     } catch (err) {
-      this._broadcast({ type: 'error', message: String(err) });
+      console.error('DO audio error:', err);
+      this._broadcast({ type: 'error', message: 'processing error' });
     }
   }
 

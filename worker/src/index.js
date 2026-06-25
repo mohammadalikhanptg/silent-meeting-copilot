@@ -112,7 +112,7 @@ export default {
         return json({ ok: true, ...result });
       } catch (err) {
         console.error('Transcribe error:', err);
-        return json({ error: String(err) }, 500);
+        return json({ error: 'internal error' }, 500);
       }
     }
 
@@ -126,7 +126,7 @@ export default {
         return json({ ok: true, ...result });
       } catch (err) {
         console.error('Coach error:', err);
-        return json({ error: String(err) }, 500);
+        return json({ error: 'internal error' }, 500);
       }
     }
 
@@ -141,7 +141,7 @@ export default {
         return json({ ok: true, ...result });
       } catch (err) {
         console.error('Enrich-flag error:', err);
-        return json({ error: String(err) }, 500);
+        return json({ error: 'internal error' }, 500);
       }
     }
 
@@ -155,7 +155,7 @@ export default {
         return json({ ok: true, ...result });
       } catch (err) {
         console.error('Minutes error:', err);
-        return json({ error: String(err) }, 500);
+        return json({ error: 'internal error' }, 500);
       }
     }
 
@@ -168,7 +168,7 @@ export default {
         return json({ ok: true, ...result });
       } catch (err) {
         console.error('Action points error:', err);
-        return json({ error: String(err) }, 500);
+        return json({ error: 'internal error' }, 500);
       }
     }
 
@@ -181,7 +181,7 @@ export default {
         return json({ ok: true, ...result });
       } catch (err) {
         console.error('Interview assessment error:', err);
-        return json({ error: String(err) }, 500);
+        return json({ error: 'internal error' }, 500);
       }
     }
 
@@ -219,46 +219,8 @@ export default {
       return stub.fetch(new Request(authedUrl, request));
     }
 
-    // GET /session/:id/ws — WebSocket upgrade routed to Durable Object
-    // Query params: ?lang=hi&mode=hindi-urdu&key=smc1_xxx.yyy (key required for helper connections)
-    const wsMatch = url.pathname.match(/^\/session\/([^/]+)\/ws$/);
-    if (wsMatch) {
-      if (request.headers.get('Upgrade') !== 'websocket') {
-        return json({ error: 'Expected WebSocket upgrade' }, 426);
-      }
-      const sessionId = wsMatch[1];
-      const pairingKey = url.searchParams.get('key');
+// Legacy /session/:id/ws and /session/:id/info routes removed (were unauthenticated; superseded by token-authed /app/ws and key-authed /helper/ws).
 
-      // If a pairing key is presented, validate it before routing to the DO.
-      // Browser connections omit ?key= and are forwarded unchanged (existing behaviour).
-      // Helper connections MUST supply a valid key that owns this session.
-      if (pairingKey) {
-        const validationResult = await validateHelperKey(pairingKey, sessionId, env);
-        if (!validationResult.valid) {
-          const pair = new WebSocketPair();
-          const [client, server] = Object.values(pair);
-          server.accept();
-          server.send(JSON.stringify({ type: 'auth_error', reason: validationResult.reason || 'invalid key' }));
-          server.close(4401, validationResult.reason || 'invalid pairing key');
-          return new Response(null, { status: 101, webSocket: client });
-        }
-        // Attach authenticated email to the request URL so the DO can record it
-        const authedUrl = new URL(request.url);
-        authedUrl.searchParams.set('_authed_email', validationResult.email);
-        request = new Request(authedUrl, request);
-      }
-
-      const doId = env.SESSIONS.idFromName(sessionId);
-      const stub = env.SESSIONS.get(doId);
-      return stub.fetch(request);
-    }
-
-    // GET /session/:id/info — lightweight session status
-    const infoMatch = url.pathname.match(/^\/session\/([^/]+)\/info$/);
-    if (infoMatch) {
-      return json({ sessionId: infoMatch[1], ok: true });
-    }
-
-    return json({ error: 'Not found' }, 404);
+        return json({ error: 'Not found' }, 404);
   },
 };
