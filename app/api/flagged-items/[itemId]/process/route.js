@@ -41,7 +41,10 @@ export async function POST(request, { params }) {
   try {
     const res = await fetch(`${ENGINE_URL}/enrich-flag`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${process.env.INTERNAL_SHARED_SECRET || process.env.HELPER_SIGNING_SECRET || ''}`,
+      },
       body: JSON.stringify({
         text: item.text,
         speaker: item.speaker,
