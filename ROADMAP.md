@@ -295,3 +295,11 @@ Revised remaining backlog (priority order):
 2. Code-sign the Windows installer (needs a code-signing certificate; operator provisioning).
 3. Security hardening, gated before any real third-party/candidate data: tokens out of the URL (needs helper rebuild), drop the signing-secret fallback with a key id for rotation, bind the engine token to the session with revocation/replay protection, strict CSP, retention/hard-delete, IDOR test, AI-provider data agreement, CI scanning, rotate the git credential. (Mostly engine-side: deploy via wrangler from the Mac, so not completable from a web/Windows-only session.)
 4. Phase 2: speaker-labelled note-taker paid option; softphone auto start/stop; per-vertical scaling.
+
+## Progress — 26 Jun 2026
+Done and deployed this session:
+- Engine transcription rewrite DEPLOYED to Cloudflare (smc-engine version 7a166c1e, /health 200). The app/cockpit changes had already auto-deployed via Vercel; the engine needed a manual wrangler deploy from the Mac, now done, so the helper reinstall is unblocked (engine-first ordering satisfied).
+- Security hardening: F8 (CI dependency + secret scanning) and F7 (automated cross-account/IDOR regression test, rebuilt + made a blocking CI gate) DONE. F5 (AI-provider data-processing confirmation) landed via a parallel stream.
+- Deploy-token note (important): the SMC worker deploys using the env var CLOUDFLARE_DEPLOY_TOKEN (exported as CLOUDFLARE_API_TOKEN for wrangler). The env var literally named CLOUDFLARE_API_TOKEN is the Workers-AI runtime token and FAILS deploys with auth error 10000.
+
+Remaining hardening (priority order): F4 data retention + hard-delete + at-rest (gate before any real third-party/candidate data) = NEXT; F2 per-device helper-key revocation; F3 drop signing-secret fallback + rotation key id; F6 strict CSP + session lifetime; F5 remove client error leakage; F1 rate-limiting (criticals, CORS, headers already closed in the baseline).
