@@ -17,3 +17,8 @@ new_sqlite_classes = ["SessionDO"]
 
 [vars]
 APP_BASE_URL = "https://silent-meeting-copilot.vercel.app"
+# Meeting-bot per-participant ingestion (Bot build 1/N). OFF by default.
+# Anything other than "true"/"1" leaves the bot ingestion path dormant. Real
+# (non-synthetic) capture is additionally hard-disabled in the engine until the
+# live capture path is built and the consent/security gate is cleared.
+BOT_CAPTURE_ENABLED = "false"
