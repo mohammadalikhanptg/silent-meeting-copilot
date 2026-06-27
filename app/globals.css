@@ -31,8 +31,8 @@
 
   /* Text */
   --tx:            #e8eaf0;
-  --tx-2:          #a8b0bd;
-  --tx-3:          #9aa6b8;
+  --tx-2:          #c4ccd8;
+  --tx-3:          #b3bdcd;
 
   /* Accent — indigo */
   --accent:        #818cf8;
@@ -119,8 +119,8 @@
   --border-subtle: rgba(0,0,0,0.04);
 
   --tx:            #0f1628;
-  --tx-2:          #374151;
-  --tx-3:          #6b7280;
+  --tx-2:          #2a3340;
+  --tx-3:          #4b5563;
 
   --accent:        #6366f1;
   --accent-hi:     #818cf8;
