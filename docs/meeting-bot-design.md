@@ -135,12 +135,49 @@ gate passes:
 - `npm run build` → success (exit 0). No `app/` files changed; the Next surface is untouched.
 - `node --check` clean on every changed/new JS file.
 
-## 10. Next increments (out of scope here)
+## 10. Sealed, independently-verifiable consent evidence record (Bot build 3/N, now built)
+
+`ConsentGate.evidence()` (§6) produces the verifiable basis-for-capture record — timestamp,
+confirmation text, disclosure method, meeting ref, and the live participant join/leave log, with
+**no audio and no transcript**. Until now it was an in-memory object that went nowhere. SMC's core
+principle is that the system is **never taken at its word**: that record must be independently
+re-verifiable *after the fact*, by a human or another system, including detecting any tampering with
+the persisted artefact. Build 3/N adds the seal-and-verify layer that makes the record persistable
+and auditable, ahead of the consent-UI / persistence increment (§11.3) that will store it.
+
+`bot/src/evidence-record.js` (new, pure, offline, **no flag, no socket, no app change**):
+- **`canonicalize(value)`** — deterministic JSON (object keys sorted recursively, array order
+  preserved, primitives JSON-encoded). It is **total**: it throws on any value JSON cannot
+  faithfully reproduce (`undefined`, functions, symbols, non-finite numbers) or that would loop
+  (circular refs), so a successful canonicalisation always round-trips and always hashes the same.
+- **`sha256Hex(input)`** — synchronous SHA-256 → hex, via `node:crypto` (matches `credential.js`).
+- **`chainParticipantLog(log)`** — a **hash chain** over the roster: each entry's hash folds in the
+  previous one (`hash = sha256(prevHash + '|' + canonical(core))`, seeded by a fixed `GENESIS_HASH`),
+  so deleting, inserting, reordering, or editing any join/leave event cascades to every later hash
+  and to the chain `head` — localising *where* tampering occurred for human review.
+- **`sealEvidence(evidence, {sealedBy, clock})`** — wraps the record into
+  `{schema:'smc-bot-consent-evidence', version:1, sealedAt, sealedBy, evidence, participantLogChain,
+  contentHash}`, where `contentHash` is `sha256(canonical(body))` over everything except the hash
+  itself. Sealing identical evidence is deterministic (same content hash).
+- **`verifyEvidenceRecord(sealed)`** — the "another system can re-verify it" half. Pure and total
+  (never throws); returns `{valid, reasons[]}`. It recomputes the content hash **and** re-derives
+  the participant-log chain from the human-readable log, comparing both to the stored chain, so
+  tampering with the evidence, the chain, or the seal metadata is caught and the failing roster
+  position is named (`participant_log_chain_broken_at_seq_N`, `…_head_mismatch`, `…_length_mismatch`,
+  `content_hash_mismatch`, plus structural `unknown_schema` / `unsupported_version`).
+
+`BotRuntime.sealConsentEvidence({clock})` (additive accessor in `bot/src/index.js`) returns the
+sealed record for its consent gate (or `null` if none) under the bot identity. This is the clean
+hand-off point the future persistence increment will call; it adds no audio/transcript, opens no
+socket, and flips no flag.
+
+## 11. Next increments (out of scope here)
 
 1. Zoom Meeting SDK adapter (raw per-participant audio) — needs operator Zoom SDK credentials +
    a Linux host; the real `/bot/ws` engine route with bot-credential auth. (The binary frame
    envelope it will carry is now built — see §8 / Bot build 2/N.)
 2. Wire the bot credential mint/validate into the app internal endpoints against `used_engine_tokens`.
-3. In-product consent UI + persistence of the consent evidence record.
+3. In-product consent UI + **persistence** of the consent evidence record. (The sealing/verification
+   contract this persistence will use is now built — see §10 / Bot build 3/N.)
 4. Bot session lifecycle in the cockpit (create from a meeting link, join, leave).
 Each gated behind the consent + final security review before real participant audio is processed.

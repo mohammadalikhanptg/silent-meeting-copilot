@@ -14,6 +14,7 @@
 
 import { BOUNDARIES, BOT_IDENTITY } from './capture-source.js';
 import { assertCaptureAllowed } from './guard.js';
+import { sealEvidence } from './evidence-record.js';
 
 export class BotRuntime {
   /**
@@ -98,4 +99,13 @@ export class BotRuntime {
   }
 
   stats() { return { framesForwarded: this._framesForwarded, identity: this.identity }; }
+
+  // Seal the consent gate's evidence into a canonical, tamper-evident, independently
+  // verifiable record (evidence-record.js). This is the clean hand-off point a later,
+  // gated increment will call to PERSIST the consent basis; it adds no audio/transcript,
+  // opens no socket, and flips no flag. Returns null if there is no consent gate.
+  sealConsentEvidence({ clock } = {}) {
+    if (!this.consentGate) return null;
+    return sealEvidence(this.consentGate.evidence(), { sealedBy: this.identity, clock });
+  }
 }

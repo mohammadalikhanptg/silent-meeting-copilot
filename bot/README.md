@@ -27,6 +27,7 @@ See `../docs/meeting-bot-design.md` for the full design.
 | `src/index.js`          | `BotRuntime` skeleton wiring adapter → consent → guard → sink |
 | `src/provenance.js`     | shared provenance wire contract (`synthetic` only, this increment) |
 | `src/frame-envelope.js` | binary participant-frame envelope codec (Bot build 2/N) — efficient successor to base64-in-JSON |
+| `src/evidence-record.js`| consent evidence sealing (Bot build 3/N) — canonical serialise + hash-chained roster + content seal + independent verifier |
 
 ## Hard gate
 
@@ -39,9 +40,12 @@ processed. The engine flag `BOT_CAPTURE_ENABLED` is off by default and no `/bot/
 From the repo root:
 
 ```
-npm run test:bot      # synthetic ingestion (31/31) + binary frame envelope (31/31)
+npm run test:bot      # synthetic ingestion (31/31) + binary frame envelope (31/31) + consent evidence sealing (41/41)
 ```
 
 The test drives the FakeAdapter through the runtime and the engine ingestion path (with an
 injected transcriber, so no Workers AI) to a **participant-labelled transcript**, and verifies the
-guard refusals, the credential lifecycle, and the flag-gating.
+guard refusals, the credential lifecycle, and the flag-gating. The evidence-record suite proves the
+consent record can be **canonically serialised, sealed, and independently re-verified**, with
+tampering (edited fields, deleted/reordered roster events, a doctored hash chain) detected and
+localised — and that no audio or transcript ever appears in the sealed record.
