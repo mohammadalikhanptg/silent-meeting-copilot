@@ -107,11 +107,24 @@ in `BOUNDARIES` and enforced by the guard.
 
 ## 8. Wire contract (engine ↔ bot)
 
-A participant frame (synthetic in this increment) is delivered to the SessionDO as a `bot_frame`
-control message carrying base64 audio plus `{participantId, displayName, tStart, tEnd, provenance,
-confidence}`. The engine ingests it only when the flag is on and (for real frames) the hard gate
-passes, producing a `transcript` segment with `channel:'participant'` and the participant identity.
-The real path will use a binary envelope (not base64-in-JSON) for efficiency — a later increment.
+A participant frame (synthetic in this increment) is delivered to the SessionDO in one of two
+equivalent encodings, both producing a `transcript` segment with `channel:'participant'` and the
+participant identity, and both ingested only when the flag is on and (for real frames) the hard
+gate passes:
+
+1. **Base64-in-JSON** — the increment-1 `bot_frame` control message carrying base64 audio plus
+   `{participantId, displayName, tStart, tEnd, provenance, confidence}`. Simple; kept for control
+   parity and tests.
+2. **Binary frame envelope** (Bot build 2/N, now built) — a compact, self-describing binary
+   message (magic `SMCB`, version 1, 40-byte little-endian header + UTF-8 `participantId` /
+   `displayName` + raw audio). This is the encoding the **real** per-participant capture path will
+   use: it avoids base64's ~33% inflation and its encode/decode CPU on raw audio. The codec lives
+   in `bot/src/frame-envelope.js` (runtime) and `worker/src/frame-envelope.js` (engine), kept
+   byte-for-byte identical exactly like the duplicated `PROVENANCE` enum, with a cross-decode test
+   guarding against drift. On the engine, a binary message is only ever interpreted as an envelope
+   for a `role==='bot'` connection (no `/bot/ws` route exists yet, so this never occurs in
+   production) and only when the flag is on; the helper ME/OTHERS binary path (byte 0 = speaker) is
+   untouched. A malformed envelope is dropped, like a malformed base64 frame.
 
 ## 9. Verification (this increment)
 
@@ -125,7 +138,8 @@ The real path will use a binary envelope (not base64-in-JSON) for efficiency —
 ## 10. Next increments (out of scope here)
 
 1. Zoom Meeting SDK adapter (raw per-participant audio) — needs operator Zoom SDK credentials +
-   a Linux host; binary frame envelope; the real `/bot/ws` engine route with bot-credential auth.
+   a Linux host; the real `/bot/ws` engine route with bot-credential auth. (The binary frame
+   envelope it will carry is now built — see §8 / Bot build 2/N.)
 2. Wire the bot credential mint/validate into the app internal endpoints against `used_engine_tokens`.
 3. In-product consent UI + persistence of the consent evidence record.
 4. Bot session lifecycle in the cockpit (create from a meeting link, join, leave).
