@@ -15,6 +15,33 @@ bindings = [
 tag = "v1"
 new_sqlite_classes = ["SessionDO"]
 
+# Rate limiting (F1) — abuse / cost / DoS backstop on the generation endpoints.
+# Per-location counters (Cloudflare native Rate Limiting). namespace_ids are
+# unique within this account; the worker fails open if a binding is absent.
+# RL_IP   : per source IP, checked before the auth callback (bad-token flood guard).
+# RL_USER : per authenticated user + endpoint (covers live /coach polling).
+# RL_HEAVY: extra, tighter bucket for the expensive /transcribe path.
+[[ratelimits]]
+name = "RL_IP"
+namespace_id = "7701"
+  [ratelimits.simple]
+  limit = 120
+  period = 60
+
+[[ratelimits]]
+name = "RL_USER"
+namespace_id = "7702"
+  [ratelimits.simple]
+  limit = 90
+  period = 60
+
+[[ratelimits]]
+name = "RL_HEAVY"
+namespace_id = "7703"
+  [ratelimits.simple]
+  limit = 20
+  period = 60
+
 [vars]
 APP_BASE_URL = "https://silent-meeting-copilot.vercel.app"
 # Meeting-bot per-participant ingestion (Bot build 1/N). OFF by default.

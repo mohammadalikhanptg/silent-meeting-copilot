@@ -1175,12 +1175,14 @@ Return ONLY this JSON:
         : [],
     };
   } catch (err) {
+    console.error('Minutes generation error:', err);
     return {
       emptyState: false,
       title: title || 'Untitled session',
       date,
       participants: [],
-      executiveSummary: `Minutes generation failed: ${String(err.message || err)}`,
+      // (F5) Generic client-facing message; detail logged server-side only.
+      executiveSummary: 'Minutes generation failed. Please try again.',
       keyPoints: [],
       decisions: [],
       actionItems: [],
@@ -1285,7 +1287,9 @@ Return ONLY this JSON:
       othersActions: cleanList(othersArr, true),
     };
   } catch (err) {
-    return { ...base, emptyState: false, error: String(err.message || err) };
+    // (F5) Generic client-facing code; detail logged server-side only.
+    console.error('Action points generation error:', err);
+    return { ...base, emptyState: false, error: 'generation_failed' };
   }
 }
 
@@ -1375,7 +1379,9 @@ Rules:
       }
       if (p && (!parsed || (Array.isArray(p.claims) && p.claims.length))) parsed = p;
     } catch (err) {
-      if (attempt === 2 && !parsed) return { ...base, emptyState: false, error: String(err.message || err) };
+      // (F5) Generic client-facing code; detail logged server-side only.
+      console.error('Interview assessment generation error:', err);
+      if (attempt === 2 && !parsed) return { ...base, emptyState: false, error: 'generation_failed' };
     }
   }
   if (!parsed) return { ...base, emptyState: false };
