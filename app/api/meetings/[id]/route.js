@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSessionPayload } from '../../../lib/auth';
 import { getSql } from '../../../lib/db';
+import { hardDeleteSession } from '../../../lib/retention';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,4 +38,28 @@ export async function PATCH(request, { params }) {
   }
 
   return NextResponse.json({ ok: true });
+}
+
+// DELETE /api/meetings/[id] — operator-triggerable HARD delete of one session.
+// Removes the meeting plus every child row (transcript segments, flagged
+// coaching artifacts, reference docs) and returns proof that nothing remains.
+// Ownership-scoped: a user can only hard-delete their own session; a cross-
+// account id returns 404 and deletes nothing (IDOR-safe — see lib/retention).
+export async function DELETE(request, { params }) {
+  const session = await getSessionPayload();
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { id } = await params;
+  const sql = getSql();
+
+  const result = await hardDeleteSession(sql, { meetingId: id, ownerEmail: session.email });
+  if (!result.ok) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
+  // remaining.total === 0 is the verifiable guarantee the session is gone.
+  return NextResponse.json({
+    ok: true,
+    deleted: result.deleted,
+    purged: result.remaining.total === 0,
+    remaining: result.remaining,
+  });
 }

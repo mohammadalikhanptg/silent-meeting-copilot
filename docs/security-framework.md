@@ -143,3 +143,27 @@ Verified this pass: `next build` passes; `node --check` clean on all changed fil
 - F5 third-party AI data handling — data-processing confirmation landed (Cloudflare Workers AI processor posture, dd8dd21). Remaining sub-item: confirm no raw provider error strings reach the client.
 - Engine — transcription rewrite DEPLOYED to Cloudflare (smc-engine version 7a166c1e, /health 200).
 - Next, in priority order: F4 data retention + hard-delete + at-rest (gate before any real third-party/candidate data), then F2 per-device helper-key revocation, the F5 error-leakage sub-item, and F1 rate-limiting (criticals/CORS/headers already closed).
+
+## 9. AI-provider data-processing position (confirmed, 25 Jun 2026)
+
+All inference runs on **Cloudflare Workers AI** (`env.AI`): Whisper large-v3-turbo (English ASR, Cloudflare-native), Llama 3.x instruct (coaching/minutes/assessment, Cloudflare-native), and Deepgram nova-3 (Hindi/Urdu + auto ASR, a third-party model hosted on Workers AI). No audio or text is sent to any provider outside Workers AI.
+
+Confirmed Workers AI data terms (Cloudflare, *Workers AI - Data usage*):
+- **No training on customer content.** Cloudflare states it does not use Customer Content to train models on Workers AI or to improve Cloudflare or third-party services without explicit consent. We give no such consent.
+- **No retention in our usage.** Cloudflare retains Workers AI Customer Content only if it is written to a Cloudflare storage service (R2, KV, Durable Objects, Vectorize) in conjunction with the AI call. Our transcription/coaching path passes audio and text straight to `env.AI.run` and persists only the resulting text to **our own** Neon database - it writes nothing to Cloudflare storage from the AI path - so Workers AI retains nothing.
+- **This is a processor relationship.** Cloudflare acts as a processor for the inference; the operator remains controller of the meeting/interview content.
+
+Provider-level opt-out applied:
+- nova-3 is the only model we use that exposes a model-improvement opt-out. We set **`mip_opt_out: true`** on every `@cf/deepgram/nova-3` call (`worker/src/session-do.js`, `transcribeDeepgram`), opting our requests out of the Deepgram Model Improvement Program. The Cloudflare-native Whisper and Llama models have no equivalent program and are covered by the no-training/no-retention statement above.
+
+This closes finding **F5** (data-handling half) and the Section-8 medium to confirm and record AI-provider data-processing terms.
+
+## 10. Retention and hard-delete (implemented, 25 Jun 2026)
+
+Closes **F4** retention/deletion. Full policy: `docs/retention-policy.md`. Single source of truth in code: `app/lib/retention.js`.
+
+- **Explicit windows** (env-overridable) for every data class: sessions (`meetings`) default 90 days after end; transcripts, derived coaching artifacts (`flagged_items`) and reference docs (`session_reference_docs`) share the parent session's lifecycle; magic links 7 days; auth attempts 30 days; expired/revoked auth sessions 30 days. **Temporary audio chunks: never persisted** - transcribed in memory by the engine and discarded. **Server logs:** platform-managed (Vercel/Cloudflare); we add no app-level logging of content.
+- **Future bot sessions** (third-party voice) default to a **short 7-day** window (`RETENTION.botSessionDays`); the purge job already honours `mode_type='bot'` so the window is enforced the day the bot lands.
+- **Operator-triggerable hard-delete:** `DELETE /api/meetings/[id]` removes the session row and every child row (transcript segments, flagged artifacts, reference docs), ownership-scoped, and returns `purged:true` only when a re-count proves zero rows remain. A scheduled `scripts/purge-retention.mjs` (`npm run purge-retention`) applies the windows in bulk; wire it to a daily cron when real/bot data lands.
+- **Proof:** `scripts/test-retention.mjs` seeds a session with rows in every child table, hard-deletes it, and asserts `remaining.total === 0` while a sibling session is untouched; it also proves window-based purge (including the short bot window). Runs offline against an in-memory store and, when `DATABASE_URL` is present, against live Neon.
+
