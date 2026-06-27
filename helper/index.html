@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' wss: ws:; connect-src *;" />
+  <!-- Tightened from connect-src * : network egress is locked to the engine (workers.dev over WSS) plus localhost for dev. script/style keep 'unsafe-inline' for the inline <style> block and the one inline onclick handler in this local Electron renderer. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://*.workers.dev wss://*.workers.dev ws://localhost:* wss://localhost:*;" />
   <title>SMC Helper</title>
   <style>
     :root { --bg:#0f1115;--panel:#171a21;--border:#2a2f37;--text:#e6e8eb;--muted:#9aa0a6;--green:#22c55e;--blue:#38bdf8;--red:#ef4444;--teal:#2AB49F;--purple:#a78bfa; }

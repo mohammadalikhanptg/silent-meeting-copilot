@@ -80,7 +80,13 @@ export class SessionDO {
     }
 
     this._broadcastHelperStatus();
-    return new Response(null, { status: 101, webSocket: client });
+    // (H2) Echo the marker subprotocol so the browser/helper completes the
+    // handshake. Only the "smc.v1" marker is echoed — never the token-bearing
+    // entry — so the secret is not reflected in a response header.
+    const offered = (request.headers.get('Sec-WebSocket-Protocol') || '')
+      .split(',').map((s) => s.trim());
+    const respHeaders = offered.includes('smc.v1') ? { 'Sec-WebSocket-Protocol': 'smc.v1' } : undefined;
+    return new Response(null, { status: 101, webSocket: client, headers: respHeaders });
   }
 
   async _loadState() {
