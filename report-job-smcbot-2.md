@@ -48,4 +48,4 @@ Committed architecture honoured: **self-hosted** (not a managed Recall.ai-class 
 
 ## Delivery
 - Branch `worker/job-smcbot-2`, all commits authored ali@khan.vg.
-- **PR:** _(filled in below once opened)_
+- **PR #5:** https://github.com/mohammadalikhanptg/silent-meeting-copilot/pull/5 (open, base `main`, **not merged** — orchestrator reviews and merges).
