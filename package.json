@@ -10,6 +10,7 @@
     "test:idor": "node scripts/test-idor.mjs",
     "test:ratelimit": "node scripts/test-engine-ratelimit.mjs",
     "test:bot": "node scripts/test-bot-synthetic.mjs && node scripts/test-bot-envelope.mjs",
+    "test:recall": "node scripts/test-recall.mjs",
     "purge-retention": "node scripts/purge-retention.mjs",
     "test:security": "node scripts/test-retention.mjs && node scripts/test-idor.mjs && node scripts/test-engine-ratelimit.mjs"
   },
