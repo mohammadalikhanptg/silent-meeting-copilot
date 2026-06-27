@@ -1,3 +1,5 @@
+import { botCaptureEnabled, ingestParticipantFrame } from './bot-ingest.js';
+
 // Durable Object: one instance per session, manages WebSocket connections
 // and accumulates audio chunks before sending to the STT provider.
 export class SessionDO {
@@ -200,6 +202,44 @@ export class SessionDO {
 
         if (ctrl.type === 'heartbeat') {
           if (role === 'browser') { try { ws.send(JSON.stringify({ type: 'pong', ts: Date.now() })); } catch (_) {} }
+          return;
+        }
+
+        // ── Meeting-bot per-participant ingestion (Bot build 1/N) ───────────
+        // DORMANT by default. The engine bot flag (BOT_CAPTURE_ENABLED) is OFF,
+        // so this branch processes nothing in production; no /bot/ws route is
+        // exposed in this increment, so no real bot can reach it. When the flag
+        // is later enabled, the bot-ingest hard guard still refuses any non-
+        // synthetic frame until the real capture path is built and consent is
+        // affirmed. The capability lives here so SessionDO can ingest bot-sourced
+        // per-participant labelled channels alongside ME/OTHERS, reusing the
+        // existing transcription path.
+        if (ctrl.type === 'bot_frame') {
+          if (role !== 'bot' || !botCaptureEnabled(this.env)) return;
+          let audio = null;
+          try { audio = base64ToBytes(ctrl.audioB64 || ''); } catch (_) { return; }
+          const sess = await this.state.storage.get(['mode', 'lang']);
+          const useMode = sess.get('mode') || mode || 'auto';
+          const useLang = sess.has('lang') ? sess.get('lang') : (lang ?? null);
+          const out = await ingestParticipantFrame(
+            {
+              env: this.env,
+              frame: {
+                participantId: ctrl.participantId,
+                displayName: ctrl.displayName,
+                frame: audio,
+                tStart: ctrl.tStart,
+                tEnd: ctrl.tEnd,
+                provenance: ctrl.provenance,
+                confidence: ctrl.confidence,
+              },
+              consentState: att.botConsent || null,
+              lang: useLang,
+              mode: useMode,
+            },
+            transcribeAndClean
+          );
+          if (out && out.ok && out.segment) this._sendToBrowsers(out.segment);
           return;
         }
 
@@ -492,6 +532,15 @@ function bytesToBase64(bytes) {
     binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
   }
   return btoa(binary);
+}
+
+// Decode a base64 audio payload (used by the dormant bot-frame ingestion path)
+// back into bytes. Throws on invalid input; callers treat a throw as "drop frame".
+function base64ToBytes(b64) {
+  const binary = atob(String(b64 || ''));
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+  return out;
 }
 
 // B2 — seam dedupe. The helper carries ~300ms of trailing audio into each new

@@ -8,6 +8,7 @@
     "start": "next start",
     "migrate": "node scripts/migrate.mjs",
     "test:idor": "node scripts/test-idor.mjs",
+    "test:bot": "node scripts/test-bot-synthetic.mjs",
     "purge-retention": "node scripts/purge-retention.mjs",
     "test:security": "node scripts/test-retention.mjs && node scripts/test-idor.mjs"
   },

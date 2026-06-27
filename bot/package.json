@@ -1,0 +1,12 @@
+{
+  "name": "smc-bot-runtime",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Self-hosted SMC meeting-bot runtime (scaffolding, increment 1). Synthetic audio only, feature-flagged off, no real meeting joins. Holds NO core app/db credentials — only a session-scoped bot credential.",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "node ../scripts/test-bot-synthetic.mjs"
+  },
+  "dependencies": {}
+}
