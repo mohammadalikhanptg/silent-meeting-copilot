@@ -50,11 +50,15 @@ export default function ProfilePage() {
   const [error, setError] = useState('');
   const [guideCopied, setGuideCopied] = useState(false);
 
-  // Helper pairing key state
-  const [helperKey, setHelperKey] = useState('');
+  // Helper pairing state (F2: per-device pairing keys + individual revocation)
   const [helperKeyVersion, setHelperKeyVersion] = useState(1);
+  const [devices, setDevices] = useState([]); // [{device_id, label, created_at, last_seen_at, revoked_at}]
+  const [newDeviceLabel, setNewDeviceLabel] = useState('');
+  const [issuedKey, setIssuedKey] = useState('');     // the key for a just-paired device (shown once)
   const [keyCopied, setKeyCopied] = useState(false);
+  const [keyIssuing, setKeyIssuing] = useState(false);
   const [keyRotating, setKeyRotating] = useState(false);
+  const [revokingId, setRevokingId] = useState('');
   const [keyError, setKeyError] = useState('');
   const [os, setOs] = useState('unknown');
 
@@ -101,8 +105,8 @@ export default function ProfilePage() {
           added_at: doc.added_at,
         })));
       }
-      if (kd.key) {
-        setHelperKey(kd.key);
+      if (kd.devices) {
+        setDevices(kd.devices);
         setHelperKeyVersion(kd.version ?? 1);
       }
     }).catch(() => setError('Failed to load profile.'))
@@ -152,25 +156,84 @@ export default function ProfilePage() {
     });
   };
 
-  // Helper key copy
+  const refreshDevices = async () => {
+    const res = await fetch('/api/helper-key');
+    const data = await res.json();
+    if (res.ok && data.devices) {
+      setDevices(data.devices);
+      setHelperKeyVersion(data.version ?? 1);
+    }
+  };
+
+  // Copy the just-issued device key (shown once)
   const copyKey = () => {
-    navigator.clipboard.writeText(helperKey).then(() => {
+    if (!issuedKey) return;
+    navigator.clipboard.writeText(issuedKey).then(() => {
       setKeyCopied(true);
       setTimeout(() => setKeyCopied(false), 2000);
     });
   };
 
-  // Rotate helper key
-  const rotateKey = async () => {
-    if (!confirm('Rotate your pairing key? Your current key will stop working immediately — you will need to update the helper app with the new key.')) return;
-    setKeyRotating(true);
+  // F2: pair a new device — mints a key for one device, shown once
+  const issueDevice = async () => {
+    setKeyIssuing(true);
+    setKeyError('');
+    setIssuedKey('');
+    try {
+      const res = await fetch('/api/helper-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'issue', label: newDeviceLabel || undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Pairing failed');
+      setIssuedKey(data.key);
+      setNewDeviceLabel('');
+      await refreshDevices();
+    } catch (e) {
+      setKeyError(String(e));
+    } finally {
+      setKeyIssuing(false);
+    }
+  };
+
+  // F2: revoke one device — others keep working
+  const revokeDevice = async (deviceId, label) => {
+    if (!confirm(`Revoke "${label}"? Its pairing key stops working immediately. Your other devices are unaffected.`)) return;
+    setRevokingId(deviceId);
     setKeyError('');
     try {
-      const res = await fetch('/api/helper-key', { method: 'POST' });
+      const res = await fetch('/api/helper-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'revoke', device_id: deviceId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Revoke failed');
+      await refreshDevices();
+    } catch (e) {
+      setKeyError(String(e));
+    } finally {
+      setRevokingId('');
+    }
+  };
+
+  // F2: rotate-all (panic button) — bumps version + revokes every device at once
+  const rotateKey = async () => {
+    if (!confirm('Revoke ALL devices? Every paired helper stops working immediately and you will need to re-pair each one. Use this only if you think a key has leaked.')) return;
+    setKeyRotating(true);
+    setKeyError('');
+    setIssuedKey('');
+    try {
+      const res = await fetch('/api/helper-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'rotate-all' }),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Rotate failed');
-      setHelperKey(data.key);
       setHelperKeyVersion(data.version);
+      await refreshDevices();
     } catch (e) {
       setKeyError(String(e));
     } finally {
@@ -460,47 +523,94 @@ export default function ProfilePage() {
               Windows: click &ldquo;More info&rdquo; → &ldquo;Run anyway&rdquo; in SmartScreen.
             </div>
 
-            {/* Pairing key */}
-            <div style={{ background: '#0f0820', border: '1px solid #2a1a4a', borderRadius: 10, padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {/* Paired devices (F2: per-device keys + individual revocation) */}
+            <div style={{ background: '#0f0820', border: '1px solid #2a1a4a', borderRadius: 10, padding: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: '#a78bfa' }}>Your pairing key</span>
-                <span style={{ fontSize: 10, color: '#6b7280' }}>version {helperKeyVersion}</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: '#a78bfa' }}>Paired devices</span>
+                <span style={{ fontSize: 10, color: '#6b7280' }}>key version {helperKeyVersion}</span>
               </div>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <code style={{
-                  flex: 1, background: '#07040f', border: '1px solid #2a1a4a',
-                  borderRadius: 6, padding: '7px 10px', fontSize: 11,
-                  color: '#c4b5fd', fontFamily: 'monospace', wordBreak: 'break-all',
-                  userSelect: 'all',
-                }}>
-                  {helperKey || 'Loading…'}
-                </code>
+
+              {/* Device list */}
+              {devices.filter(d => !d.revoked_at).length === 0 && (
+                <div style={{ fontSize: 12, color: '#6b7280' }}>No active devices. Pair one below to use the helper.</div>
+              )}
+              {devices.filter(d => !d.revoked_at).map(d => (
+                <div key={d.device_id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, background: '#07040f', border: '1px solid #2a1a4a', borderRadius: 6, padding: '8px 10px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                    <span style={{ fontSize: 12, color: '#c4b5fd', fontWeight: 600 }}>{d.label || 'Helper device'}</span>
+                    <span style={{ fontSize: 10, color: '#6b7280' }}>
+                      Added {d.created_at ? new Date(d.created_at).toLocaleDateString() : '—'}
+                      {d.last_seen_at ? ` · last seen ${new Date(d.last_seen_at).toLocaleString()}` : ' · never connected'}
+                    </span>
+                  </div>
+                  <button
+                    style={{ ...styles.removeBtn, flexShrink: 0, color: '#fca5a5', borderColor: '#7a2a2a' }}
+                    onClick={() => revokeDevice(d.device_id, d.label || 'Helper device')}
+                    disabled={revokingId === d.device_id}
+                  >
+                    {revokingId === d.device_id ? 'Revoking…' : 'Revoke'}
+                  </button>
+                </div>
+              ))}
+
+              {/* Pair a new device */}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <input
+                  style={{ ...styles.input, flex: 1, minWidth: 160 }}
+                  placeholder="New device name (e.g. Work laptop)"
+                  value={newDeviceLabel}
+                  onChange={e => setNewDeviceLabel(e.target.value)}
+                  maxLength={80}
+                />
                 <button
-                  style={{ ...styles.copyBtn, background: keyCopied ? '#14532d' : '#1a0a2e', borderColor: keyCopied ? '#22c55e' : '#2a1a4a', color: keyCopied ? '#22c55e' : '#a78bfa', flexShrink: 0 }}
-                  onClick={copyKey}
-                  disabled={!helperKey}
+                  style={{ ...styles.addBtn, background: '#0f0820', borderColor: '#4b2a7a', color: '#a78bfa' }}
+                  onClick={issueDevice}
+                  disabled={keyIssuing}
                 >
-                  {keyCopied ? '✓ Copied' : 'Copy'}
+                  {keyIssuing ? 'Pairing…' : '+ Pair a device'}
                 </button>
               </div>
+
+              {/* Newly-issued key, shown once */}
+              {issuedKey && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, background: '#07040f', border: '1px solid #4b2a7a', borderRadius: 6, padding: 10 }}>
+                  <span style={{ fontSize: 11, color: '#a78bfa', fontWeight: 600 }}>New pairing key — copy it now, it is shown only once:</span>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <code style={{ flex: 1, background: '#0f0820', border: '1px solid #2a1a4a', borderRadius: 6, padding: '7px 10px', fontSize: 11, color: '#c4b5fd', fontFamily: 'monospace', wordBreak: 'break-all', userSelect: 'all' }}>
+                      {issuedKey}
+                    </code>
+                    <button
+                      style={{ ...styles.copyBtn, background: keyCopied ? '#14532d' : '#1a0a2e', borderColor: keyCopied ? '#22c55e' : '#2a1a4a', color: keyCopied ? '#22c55e' : '#a78bfa', flexShrink: 0 }}
+                      onClick={copyKey}
+                    >
+                      {keyCopied ? '✓ Copied' : 'Copy'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {keyError && <div style={{ fontSize: 12, color: '#fca5a5' }}>{keyError}</div>}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <button
-                  style={{ ...styles.addBtn, background: keyRotating ? '#1a0a2e' : '#0f0820', borderColor: '#4b2a7a', color: '#a78bfa' }}
-                  onClick={rotateKey}
-                  disabled={keyRotating || !helperKey}
-                >
-                  {keyRotating ? 'Rotating…' : 'Rotate key'}
-                </button>
-                <span style={{ fontSize: 11, color: '#6b7280' }}>Rotating invalidates the current key immediately.</span>
-              </div>
+
+              {/* Panic button: revoke every device at once */}
+              {devices.filter(d => !d.revoked_at).length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, borderTop: '1px solid #2a1a4a', paddingTop: 10 }}>
+                  <button
+                    style={{ ...styles.addBtn, background: keyRotating ? '#1a0a2e' : '#1a0a0a', borderColor: '#7a2a2a', color: '#fca5a5' }}
+                    onClick={rotateKey}
+                    disabled={keyRotating}
+                  >
+                    {keyRotating ? 'Revoking…' : 'Revoke all devices'}
+                  </button>
+                  <span style={{ fontSize: 11, color: '#6b7280' }}>Use only if a key may have leaked — every device must re-pair.</span>
+                </div>
+              )}
             </div>
 
             {/* Setup steps */}
             <div style={{ fontSize: 12, color: '#9aa0a6', lineHeight: 1.8 }}>
               <strong style={{ color: '#a78bfa' }}>Setup:</strong>
               {' '}1. Download and install the helper above.{' '}
-              2. Copy your pairing key.{' '}
+              2. Click &ldquo;Pair a device&rdquo; and copy the key it gives you.{' '}
               3. Open the helper, paste the key in the &ldquo;Pairing key&rdquo; field, click Save.{' '}
               4. Enter the session code from your browser session page and click Start.
             </div>

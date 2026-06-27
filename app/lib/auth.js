@@ -254,9 +254,14 @@ function timingEq(aStr, bStr) {
 
 // ── Helper pairing key ────────────────────────────────────────────────────────
 
-export function generateHelperKey(email, version) {
+// F2: deviceId (optional) binds the key to a single registered device so it can be
+// revoked individually via the helper_devices list. Keys minted before F2 omit it
+// (legacy migration bridge — see app/lib/helper-devices.js).
+export function generateHelperKey(email, version, deviceId) {
   const { activeKid } = signingKeyring();
-  const payload = Buffer.from(JSON.stringify({ u: email, v: version, kid: activeKid })).toString('base64url');
+  const body = { u: email, v: version, kid: activeKid };
+  if (deviceId) body.d = deviceId;
+  const payload = Buffer.from(JSON.stringify(body)).toString('base64url');
   const sig = hmacSign(payload, signingSecretForKid(activeKid));
   return `smc1_${payload}.${sig}`;
 }
@@ -271,7 +276,7 @@ export function decodeHelperKey(key) {
   try {
     const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
     if (!parsed.u || parsed.v === undefined) return null;
-    return { payload, sig, email: parsed.u, version: parsed.v, kid: parsed.kid || null };
+    return { payload, sig, email: parsed.u, version: parsed.v, deviceId: parsed.d || null, kid: parsed.kid || null };
   } catch {
     return null;
   }

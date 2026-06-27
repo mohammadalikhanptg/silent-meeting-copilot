@@ -142,6 +142,19 @@ try {
   }
   // Session 14 P1: per-user helper pairing key versioning
   await sql`ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS helper_key_version INT NOT NULL DEFAULT 1`;
+  // Security hardening F2: per-device helper pairing + individual revocation.
+  // Each registered helper device gets a server-issued id baked into its signed
+  // pairing key; revoking one device (revoked_at) leaves the others working,
+  // unlike the coarse helper_key_version bump that kicks every device at once.
+  await sql`CREATE TABLE IF NOT EXISTS helper_devices (
+    device_id    text PRIMARY KEY,
+    user_email   text NOT NULL,
+    label        text,
+    created_at   timestamptz NOT NULL DEFAULT now(),
+    last_seen_at timestamptz,
+    revoked_at   timestamptz
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_helper_devices_user ON helper_devices (user_email)`;
   // Session 14 P2: link session code to meeting for engine ownership validation
   await sql`ALTER TABLE meetings ADD COLUMN IF NOT EXISTS session_code text`;
   await sql`CREATE INDEX IF NOT EXISTS idx_meetings_session_code ON meetings (session_code)`;

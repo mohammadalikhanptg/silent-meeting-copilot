@@ -9,9 +9,11 @@
     "migrate": "node scripts/migrate.mjs",
     "test:idor": "node scripts/test-idor.mjs",
     "test:ratelimit": "node scripts/test-engine-ratelimit.mjs",
+    "test:pairing": "node scripts/test-helper-pairing.mjs",
+    "test:devices": "node scripts/test-helper-devices.mjs",
     "test:bot": "node scripts/test-bot-synthetic.mjs",
     "purge-retention": "node scripts/purge-retention.mjs",
-    "test:security": "node scripts/test-retention.mjs && node scripts/test-idor.mjs && node scripts/test-engine-ratelimit.mjs"
+    "test:security": "node scripts/test-retention.mjs && node scripts/test-idor.mjs && node scripts/test-engine-ratelimit.mjs && node scripts/test-helper-pairing.mjs && node scripts/test-helper-devices.mjs"
   },
   "dependencies": {
     "@neondatabase/serverless": "latest",
