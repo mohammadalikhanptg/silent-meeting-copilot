@@ -1118,7 +1118,7 @@ export default function SessionPage() {
                   onChange={e => setTitle(e.target.value)}
                   placeholder="e.g. Q2 Planning — Client X"
                   style={styles.textInput}
-                  maxLength={120}
+                  maxLength={300}
                 />
               </div>
 
@@ -1127,14 +1127,13 @@ export default function SessionPage() {
                 <label style={styles.selectorLabel} htmlFor="objective">
                   Meeting objective (optional — enables coaching alignment)
                 </label>
-                <input
+                <textarea
                   id="objective"
-                  type="text"
                   value={objective}
                   onChange={e => setObjective(e.target.value)}
                   placeholder="e.g. Agree on project timeline and assign owners"
-                  style={styles.textInput}
-                  maxLength={200}
+                  style={{ ...styles.textInput, minHeight: 72, resize: 'vertical', fontFamily: 'inherit' }}
+                  maxLength={8000}
                 />
               </div>
 
@@ -1149,10 +1148,10 @@ export default function SessionPage() {
                   onChange={e => setContextNotes(e.target.value)}
                   placeholder="Describe what this meeting is about and how you want to be coached. E.g. 'Quarterly review with client X. They are evaluating EV fleet options. We offer fleet advisory. Coach me to ask about budget and timeline.'"
                   style={{ ...styles.textInput, minHeight: 80, resize: 'vertical', fontFamily: 'inherit' }}
-                  maxLength={2000}
+                  maxLength={20000}
                 />
                 <div style={{ fontSize: 10, color: '#4b5563', marginTop: 2 }}>
-                  {contextNotes.length}/2000 chars — this feeds the coaching AI for this session
+                  {contextNotes.length}/20000 chars — this feeds the coaching AI for this session
                 </div>
               </div>
 

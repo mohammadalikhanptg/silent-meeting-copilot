@@ -31,8 +31,8 @@
 
   /* Text */
   --tx:            #e8eaf0;
-  --tx-2:          #9ca3af;
-  --tx-3:          #6b7280;
+  --tx-2:          #a8b0bd;
+  --tx-3:          #9aa6b8;
 
   /* Accent — indigo */
   --accent:        #818cf8;
@@ -875,7 +875,7 @@ body::before {
   background: var(--bg-panel);
   border: 1px solid rgba(255,255,255,0.9);
   border-radius: var(--r-lg);
-  box-shadow: 12px 12px 28px rgba(120,130,170,0.18), -10px -10px 24px rgba(255,255,255,0.92), inset 1px 1px 2px rgba(255,255,255,0.7);
+  box-shadow: 0 12px 30px rgba(60,70,110,0.16), 0 3px 10px rgba(60,70,110,0.10);
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
@@ -884,10 +884,10 @@ body::before {
 [data-theme="light"] .smc-select,
 [data-theme="light"] .auth-input {
   background: #eef0f8;
-  box-shadow: inset 2px 2px 5px rgba(120,130,170,0.16), inset -2px -2px 5px rgba(255,255,255,0.95);
+  box-shadow: inset 1px 1px 3px rgba(60,70,110,0.10), inset -1px -1px 3px rgba(255,255,255,0.45);
   border: 1px solid rgba(255,255,255,0.85);
 }
-[data-theme="light"] .session-card:hover { box-shadow: 14px 14px 32px rgba(120,130,170,0.22), -10px -10px 24px rgba(255,255,255,0.92); }
+[data-theme="light"] .session-card:hover { box-shadow: 0 16px 36px rgba(60,70,110,0.20), 0 4px 12px rgba(60,70,110,0.12); }
 
 /* Let the living background show through full-page containers */
 .sessions-root, .auth-root { background: transparent !important; }
