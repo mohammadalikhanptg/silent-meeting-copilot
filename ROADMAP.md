@@ -316,6 +316,14 @@ Done and deployed this session:
 
 Remaining backlog (priority order):
 1. Meeting-bot next increments (gated on consent UI + final review): real Zoom Meeting SDK adapter (needs operator Zoom Marketplace SDK credentials + a Linux host), binary frame envelope, wire the bot credential into app internal endpoints, consent UI + evidence persistence.
-2. F2 per-device helper-key revocation (helper already sends a device id); F1 rate-limiting.
+2. F2 per-device helper-key revocation (helper already sends a device id).
 3. Operator: rotate the git-embedded GitHub credential in the Mac remote; optionally set the CLOUDFLARE_API_TOKEN repo secret to a deploy-capable token to enable PR #4 (engine auto-deploy CI, left open); optional Brave search key; Windows installer code-signing cert.
 4. Phase 2: speaker-labelled note-taker paid option; softphone auto start/stop; per-vertical scaling.
+
+## Progress — 27 Jun 2026 (later) — security hardening 3/N (job-smcsec-3)
+
+PR opened (not merged; orchestrator reviews/merges/deploys — engine deploy is manual or via the still-open PR #4):
+- **F1 rate-limiting — DONE.** The last open piece of F1 (auth + CORS + body-cap were already closed). All six engine generation endpoints are now rate limited via Cloudflare native Rate Limiting bindings: `RL_IP` 120/60s (per IP, checked before the auth callback so bad-token floods can't hammer the app validator), `RL_USER` 90/60s (per authenticated email + endpoint; covers live `/coach` polling), and `RL_HEAVY` 20/60s (extra bucket for the expensive `/transcribe`). 429 + `Retry-After` on exceed; internal-secret server-to-server callers exempt; **fails open** so a limiter outage never takes the copilot offline. New `worker/src/ratelimit.js`, wired in `worker/src/index.js`, bindings in `worker/wrangler.toml`.
+- **F5 error-leakage sub-item — CLOSED.** Three engine generators (`generateMinutes`/`generateActionPoints`/`generateInterviewAssessment`) no longer return raw `err.message` to clients — generic message/`generation_failed` code with server-side `console.error` only.
+- Verified: `test:security` (retention + IDOR 57/0 + new rate-limit 44/0) all green; `test:bot` 31/0; `wrangler deploy --dry-run` validates the three bindings + bundles clean. No app/ code touched (engine-only), so `next build` is unaffected and not re-run.
+- The gate before real third-party/candidate data is met (H2, H4, CSP, F4, F5, F7, F8, and now F1). Remaining hardening: **F2** per-device helper-key revocation; operator action: rotate the git-embedded GitHub credential.

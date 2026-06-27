@@ -144,6 +144,19 @@ Verified this pass: `next build` passes; `node --check` clean on all changed fil
 - Engine — transcription rewrite DEPLOYED to Cloudflare (smc-engine version 7a166c1e, /health 200).
 - Next, in priority order: F4 data retention + hard-delete + at-rest (gate before any real third-party/candidate data), then F2 per-device helper-key revocation, the F5 error-leakage sub-item, and F1 rate-limiting (criticals/CORS/headers already closed).
 
+## Remediation status update (27 Jun 2026, hardening 3/N — job-smcsec-3)
+
+Done this pass (PR open for orchestrator review, not yet merged): **F1 rate-limiting** (the last open piece of F1; auth + CORS lockdown + body-size cap were already closed) and the **F5 client error-leakage sub-item**.
+
+- **F1 — rate limiting on the engine generation endpoints.** All six protected POST endpoints (`/transcribe`, `/coach`, `/enrich-flag`, `/minutes`, `/action-points`, `/interview-assessment`) are now rate limited on top of the existing auth and body-size cap. Built on Cloudflare's native Rate Limiting bindings (`worker/src/ratelimit.js`, wired in `worker/src/index.js`, configured in `worker/wrangler.toml`):
+  - **`RL_IP`** (120/60s, per source IP) is checked **before** the auth callback, so a flood of bad-token requests cannot hammer the app's `validate-session-token` endpoint.
+  - **`RL_USER`** (90/60s, keyed by authenticated email + endpoint) caps each user per endpoint; 90/min comfortably covers live `/coach` polling during a meeting while still capping abuse.
+  - **`RL_HEAVY`** (20/60s, per user) is an extra, tighter bucket on the expensive `/transcribe` path.
+  - Limit exceeded → **HTTP 429** with `Retry-After`. Trusted server-to-server callers presenting `INTERNAL_SHARED_SECRET` (boundary B4) are **exempt** (they are authenticated and may legitimately burst; the shared app egress IP must not be throttled for all users at once). The limiter **fails open**: a missing binding or a `.limit()` error allows the request, so a limiter outage never takes the meeting copilot offline — auth and the body cap still apply. Limits are per Cloudflare location (documented native-binding behaviour), which is sufficient as an abuse/DoS/cost backstop.
+- **F5 — error leakage (engine).** The remaining sub-item is closed. Three generators returned `String(err.message || err)` to the client on failure (`generateMinutes`, `generateActionPoints`, `generateInterviewAssessment` in `worker/src/session-do.js`); these now return a generic message / `generation_failed` code and log the detail server-side with `console.error`. The HTTP catch handlers in `index.js` (generic `internal error`) and the WebSocket error broadcast (generic `processing error`) were already non-leaking; the WS `auth_error` carries only controlled reason strings from the app validator, not raw provider errors.
+
+Verified: `node --check` clean on all changed files; `node scripts/test-engine-ratelimit.mjs` 44/0 (rate-limit unit + real `worker.fetch` wiring with stubbed bindings + F5 source checks); `npm run test:security` (retention + IDOR 57/0 + rate-limit) all green; `npm run test:bot` 31/0 (shared engine modules unaffected); `wrangler deploy --dry-run` validates the three rate-limit bindings and bundles cleanly. Remaining hardening after this pass: **F2** per-device helper-key revocation, plus the operator action to rotate the git-embedded GitHub credential. The gate before real third-party/candidate data (H2, H4, CSP, F4, F5, F7, F8 — and now F1) is met.
+
 ## 9. AI-provider data-processing position (confirmed, 25 Jun 2026)
 
 All inference runs on **Cloudflare Workers AI** (`env.AI`): Whisper large-v3-turbo (English ASR, Cloudflare-native), Llama 3.x instruct (coaching/minutes/assessment, Cloudflare-native), and Deepgram nova-3 (Hindi/Urdu + auto ASR, a third-party model hosted on Workers AI). No audio or text is sent to any provider outside Workers AI.

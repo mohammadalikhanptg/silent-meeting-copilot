@@ -1,4 +1,5 @@
 import { SessionDO, transcribeAndClean, generateCoaching, enrichFlaggedItem, generateMinutes, generateActionPoints, generateInterviewAssessment } from './session-do.js';
+import { clientIp, checkIpLimit, checkUserLimit, RL_PERIOD_SECONDS } from './ratelimit.js';
 
 export { SessionDO };
 
@@ -60,6 +61,15 @@ function cors(body, status = 200, extra = {}) {
 
 function json(obj, status = 200) {
   return cors(JSON.stringify(obj), status, { 'Content-Type': 'application/json' });
+}
+
+// 429 with Retry-After (F1). The native limiter does not expose remaining time,
+// so we advise the binding's window length.
+function tooMany() {
+  return cors(JSON.stringify({ error: 'rate limited' }), 429, {
+    'Content-Type': 'application/json',
+    'Retry-After': String(RL_PERIOD_SECONDS),
+  });
 }
 
 // Validate a helper pairing key by calling the Next.js internal endpoint.
@@ -158,8 +168,26 @@ export default {
       const clen = Number(request.headers.get('Content-Length') || 0);
       const maxBytes = url.pathname === '/transcribe' ? 12000000 : 1000000;
       if (clen > maxBytes) return json({ error: 'payload too large' }, 413);
+
+      // (F1) Rate limiting. Trusted server-to-server callers presenting
+      // INTERNAL_SHARED_SECRET (boundary B4) are exempt; peek for that before the
+      // auth callback so the per-IP backstop protects the validate fetch from a
+      // bad-token flood. Limiter fails open (see ratelimit.js).
+      const bearer = (request.headers.get('Authorization') || '').replace(/^Bearer /, '');
+      const isSvc = !!(env.INTERNAL_SHARED_SECRET && ctEq(bearer, env.INTERNAL_SHARED_SECRET));
+      if (!isSvc) {
+        const ipCheck = await checkIpLimit(env, clientIp(request));
+        if (!ipCheck.ok) return tooMany();
+      }
+
       const a = await requirePostAuth(request, env);
       if (!a.ok) return json({ error: 'unauthorized' }, 401);
+
+      // Per-user, per-endpoint limit (plus a tighter bucket for /transcribe).
+      if (!a.svc) {
+        const userCheck = await checkUserLimit(env, { id: a.email, path: url.pathname });
+        if (!userCheck.ok) return tooMany();
+      }
     }
 
     if (url.pathname === '/transcribe' && request.method === 'POST') {
