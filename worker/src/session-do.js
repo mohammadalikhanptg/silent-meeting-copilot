@@ -1,4 +1,5 @@
 import { botCaptureEnabled, ingestParticipantFrame } from './bot-ingest.js';
+import { decodeFrameEnvelope } from './frame-envelope.js';
 
 // Durable Object: one instance per session, manages WebSocket connections
 // and accumulates audio chunks before sending to the STT provider.
@@ -277,6 +278,36 @@ export class SessionDO {
 
       // Binary frame: byte 0 = speaker (0 me, 1 others); remainder is a COMPLETE audio file.
       const bytes = new Uint8Array(message);
+
+      // ── Meeting-bot binary frame envelope (Bot build 2/N) ───────────────
+      // DORMANT by default. ONLY a role==='bot' connection is interpreted as a
+      // binary participant-frame envelope (the efficient successor to the
+      // base64-in-JSON `bot_frame` control message). No /bot/ws route exists in
+      // this increment, so role==='bot' never occurs in production, and the
+      // flag is off. The helper/browser ME/OTHERS binary path below (byte 0 =
+      // speaker) is therefore byte-for-byte unchanged for every other role. The
+      // bot-ingest hard guard still refuses any non-synthetic frame.
+      if (role === 'bot') {
+        if (!botCaptureEnabled(this.env)) return;
+        let pframe = null;
+        try { pframe = decodeFrameEnvelope(bytes); } catch (_) { return; }
+        const sess = await this.state.storage.get(['mode', 'lang']);
+        const useMode = sess.get('mode') || mode || 'auto';
+        const useLang = sess.has('lang') ? sess.get('lang') : (lang ?? null);
+        const out = await ingestParticipantFrame(
+          {
+            env: this.env,
+            frame: pframe,
+            consentState: att.botConsent || null,
+            lang: useLang,
+            mode: useMode,
+          },
+          transcribeAndClean
+        );
+        if (out && out.ok && out.segment) this._sendToBrowsers(out.segment);
+        return;
+      }
+
       if (bytes.length < 2) return;
       const speaker = bytes[0] === 1 ? 'others' : 'me';
 

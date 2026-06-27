@@ -26,6 +26,7 @@ See `../docs/meeting-bot-design.md` for the full design.
 | `src/guard.js`          | runtime hard gate — refuses real capture in this increment |
 | `src/index.js`          | `BotRuntime` skeleton wiring adapter → consent → guard → sink |
 | `src/provenance.js`     | shared provenance wire contract (`synthetic` only, this increment) |
+| `src/frame-envelope.js` | binary participant-frame envelope codec (Bot build 2/N) — efficient successor to base64-in-JSON |
 
 ## Hard gate
 
@@ -38,7 +39,7 @@ processed. The engine flag `BOT_CAPTURE_ENABLED` is off by default and no `/bot/
 From the repo root:
 
 ```
-npm run test:bot      # node scripts/test-bot-synthetic.mjs  → 31/31
+npm run test:bot      # synthetic ingestion (31/31) + binary frame envelope (31/31)
 ```
 
 The test drives the FakeAdapter through the runtime and the engine ingestion path (with an
