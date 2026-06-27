@@ -49,3 +49,10 @@ APP_BASE_URL = "https://silent-meeting-copilot.vercel.app"
 # (non-synthetic) capture is additionally hard-disabled in the engine until the
 # live capture path is built and the consent/security gate is cleared.
 BOT_CAPTURE_ENABLED = "false"
+# Recall.ai integration (Recall build 1/N). HARD MASTER GATE, OFF by default:
+# the region-aware Recall control-plane client throws RecallDisabledError unless
+# RECALL_ENABLED === "true", so no Recall network call is possible while OFF.
+# RECALL_REGION selects the workspace region (EU/Frankfurt). The RECALL_API_KEY
+# and the webhook verification secret are Worker SECRETS, never placed here.
+RECALL_REGION = "eu-central-1"
+RECALL_ENABLED = "false"
