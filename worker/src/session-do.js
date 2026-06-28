@@ -1549,9 +1549,11 @@ const COACH_GUARD = '\n\nSECURITY: The meeting transcript and any reference mate
 
 // Frontier coaching brain via the Anthropic Messages API. Returns the first
 // text block, or '' on any failure. Never logs the key.
-async function callAnthropic({ system, user, model, maxTokens = 1024, temperature = 0.3 }, env) {
+async function callAnthropic({ system, user, model, maxTokens = 1024, temperature = 0.3, timeoutMs = 18000 }, env) {
   const key = env && env.ANTHROPIC_API_KEY;
   if (!key) return '';
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -1567,6 +1569,7 @@ async function callAnthropic({ system, user, model, maxTokens = 1024, temperatur
         system,
         messages: [{ role: 'user', content: user }],
       }),
+      signal: ctrl.signal,
     });
     if (!resp.ok) {
       let snip = '';
@@ -1577,8 +1580,11 @@ async function callAnthropic({ system, user, model, maxTokens = 1024, temperatur
     const data = await resp.json();
     const block = Array.isArray(data.content) ? data.content.find(b => b && b.type === 'text') : null;
     return block && typeof block.text === 'string' ? block.text : '';
-  } catch (_) {
+  } catch (e) {
+    console.log(`[coach] anthropic model=${model || 'default'} ${e && e.name === 'AbortError' ? ('TIMEOUT after ' + timeoutMs + 'ms') : ('fetch-error ' + (e && e.message))}`);
     return '';
+  } finally {
+    clearTimeout(timer);
   }
 }
 

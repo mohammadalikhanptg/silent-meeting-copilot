@@ -233,9 +233,12 @@ export default function SessionPage() {
       const me = meLinesRef.current.map(l => l.cleaned);
       const others = othersLinesRef.current.map(l => l.cleaned);
       if (me.length + others.length < COACH_MIN_SEGMENTS) return;
+      const coachCtrl = new AbortController();
+      const coachTo = setTimeout(() => coachCtrl.abort(), 45000);
       try {
         const res = await fetch(`${ENGINE_URL}/coach`, {
           method: 'POST',
+          signal: coachCtrl.signal,
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokenRef.current || ''}` },
           body: JSON.stringify({
             me,
@@ -286,7 +289,7 @@ export default function SessionPage() {
           setCoaching({ ...data, updatedAt: new Date().toLocaleTimeString() });
           setDriftStreak(prev => (data?.selfCorrection?.drifting ? prev + 1 : 0));
         }
-      } catch (_) {}
+      } catch (_) {} finally { clearTimeout(coachTo); }
     };
 
     pollCoach();
