@@ -151,9 +151,16 @@ export class StreamingTranscriber {
     this.ws = null;
     this._log('close', code, reason);
     if (this._closing) { this._status('closed'); return; }
-    // 4xxx application close = auth / quota / bad-request. Surface, do not retry.
-    if (code >= 4000 && code < 5000) {
-      try { this.opts.onError && this.opts.onError({ channel: this.channel, code, reason: reason || 'provider rejected', fatal: true }); } catch (_) {}
+    const reasonStr = (reason || '').toString();
+    // Rate limit / subscription / quota: Sarvam signals this with close 1003 (and a
+    // descriptive reason). Treat it like a 4xxx application reject: surface a clear,
+    // actionable message and do NOT retry (retrying a rate/quota limit makes it worse).
+    const rateLimited = code === 1003 || /rate limit|subscription|quota|exceeded/i.test(reasonStr);
+    if ((code >= 4000 && code < 5000) || rateLimited) {
+      const msg = rateLimited
+        ? ('Sarvam rejected the stream: ' + (reasonStr || 'rate limit / subscription limit') + ' (check the Sarvam dashboard subscription and quota).')
+        : (reasonStr || 'provider rejected the connection');
+      try { this.opts.onError && this.opts.onError({ channel: this.channel, code, reason: msg, fatal: true }); } catch (_) {}
       this._status('dead');
       return;
     }
@@ -170,7 +177,11 @@ export class StreamingTranscriber {
       setTimeout(() => { this._connect().catch((e) => this._log('reconnect failed', e && e.message)); }, delay);
       return;
     }
-    // Clean close (1000) or unknown — do not reconnect.
+    // Unknown non-clean close: surface a non-fatal notice so the cockpit is not left
+    // silently dead, then stop (no reconnect).
+    if (code !== 1000) {
+      try { this.opts.onError && this.opts.onError({ channel: this.channel, code, reason: reasonStr || ('connection closed (' + code + ')'), fatal: false }); } catch (_) {}
+    }
     this._status('closed');
   }
 
