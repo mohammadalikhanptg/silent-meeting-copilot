@@ -49,3 +49,13 @@ APP_BASE_URL = "https://silent-meeting-copilot.vercel.app"
 # (non-synthetic) capture is additionally hard-disabled in the engine until the
 # live capture path is built and the consent/security gate is cleared.
 BOT_CAPTURE_ENABLED = "false"
+
+# Sarvam Saaras v3 streaming engine (additive, OFF by default). When "true" AND a
+# session selects engine=sarvam, ME/OTHERS PCM frames relay to Sarvam instead of
+# nova-3. nova-3 stays the default engine and the fallback. SARVAM_API_KEY is a secret.
+SARVAM_ENABLED = "false"
+SARVAM_MODE = "codemix"
+SARVAM_LANG = "hi-IN"
+SARVAM_CODEC = "pcm_s16le"
+SARVAM_ENCODING = "audio/x-raw"
+SARVAM_DEBUG = "false"

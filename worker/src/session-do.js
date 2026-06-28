@@ -1,5 +1,17 @@
 import { botCaptureEnabled, ingestParticipantFrame } from './bot-ingest.js';
 import { decodeFrameEnvelope } from './frame-envelope.js';
+import { StreamingTranscriber } from './sarvam-relay.js';
+
+// Sarvam engine flag/debug gates. Additive: anything other than an explicit
+// truthy value leaves the nova-3 path as the sole engine.
+function sarvamEnabled(env) {
+  const v = String((env && env.SARVAM_ENABLED) ?? '').toLowerCase();
+  return v === 'true' || v === '1';
+}
+function sarvamDebug(env) {
+  const v = String((env && env.SARVAM_DEBUG) ?? '').toLowerCase();
+  return v === 'true' || v === '1';
+}
 
 // Durable Object: one instance per session, manages WebSocket connections
 // and accumulates audio chunks before sending to the STT provider.
@@ -19,6 +31,9 @@ export class SessionDO {
     this._seam = { me: [], others: [] };
     // B6 — lightweight observability (no audio content is ever logged/persisted).
     this._metrics = SessionDO._freshMetrics();
+    // Sarvam streaming relays, one per channel, created lazily while a
+    // sarvam-engine session is capturing; torn down on stop/suspend.
+    this._sarvam = { me: null, others: null };
   }
 
   static _freshMetrics() {
@@ -49,17 +64,18 @@ export class SessionDO {
     if (!authedEmail) return new Response('unauthorized', { status: 401 });
     const lang = url.searchParams.get('lang') || null;
     const mode = url.searchParams.get('mode') || 'auto';
+    const engine = url.searchParams.get('engine') || 'nova3';
     const role = url.searchParams.get('role') === 'helper' ? 'helper' : 'browser';
     const cid = (crypto.randomUUID && crypto.randomUUID()) || (String(Date.now()) + Math.random().toString(36).slice(2));
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.state.acceptWebSocket(server);
-    server.serializeAttachment({ lang, mode, role, cid, epoch: 0 });
+    server.serializeAttachment({ lang, mode, engine, role, cid, epoch: 0 });
 
-    // The browser cockpit's connect-time mode/lang becomes the session default.
-    if (role === 'browser' && (mode || lang)) {
-      await this.state.storage.put({ mode: mode || 'auto', lang: lang || null });
+    // The browser cockpit's connect-time mode/lang/engine becomes the session default.
+    if (role === 'browser') {
+      await this.state.storage.put({ mode: mode || 'auto', lang: lang || null, engine: engine || 'nova3' });
     }
 
     const st = await this._loadState();
@@ -187,11 +203,13 @@ export class SessionDO {
           const next = { ...att };
           if (ctrl.lang !== undefined) next.lang = ctrl.lang || null;
           if (ctrl.mode !== undefined) next.mode = ctrl.mode || 'auto';
+          if (ctrl.engine !== undefined) next.engine = ctrl.engine || 'nova3';
           ws.serializeAttachment(next);
           if (role === 'browser') {
             const patch = {};
             if (ctrl.mode !== undefined) patch.mode = ctrl.mode || 'auto';
             if (ctrl.lang !== undefined) patch.lang = ctrl.lang || null;
+            if (ctrl.engine !== undefined) patch.engine = ctrl.engine || 'nova3';
             if (Object.keys(patch).length) await this.state.storage.put(patch);
             if ((await this.state.storage.get('capturing')) === true) {
               const sess = await this.state.storage.get(['mode','lang']);
@@ -249,6 +267,7 @@ export class SessionDO {
             const now = Date.now();
             // Fresh segmentation seam + metrics window for the (re)started capture.
             this._seam = { me: [], others: [] };
+            this._closeSarvam();
             this._flushMetrics(ctrl.action);
             this._metrics = SessionDO._freshMetrics();
             const patch = { managed: true, capturing: true, status: 'active', captureStartedAt: now, graceUntil: null };
@@ -267,6 +286,7 @@ export class SessionDO {
           } else if (ctrl.action === 'stop') {
             this._flushMetrics('stop');
             this._seam = { me: [], others: [] };
+            this._closeSarvam();
             await this.state.storage.put({ managed: true, capturing: false, status: 'ended', graceUntil: null, activeHelperId: null });
             this._sendToHelpers({ type: 'capture', action: 'stop' });
             const st = await this._loadState();
@@ -326,9 +346,20 @@ export class SessionDO {
       }
 
       const audio = bytes.slice(1);
-      const sess = await this.state.storage.get(['mode','lang']);
+      const sess = await this.state.storage.get(['mode','lang','engine']);
       const useMode = sess.get('mode') || mode || 'auto';
       const useLang = sess.has('lang') ? sess.get('lang') : (lang ?? null);
+      const useEngine = sess.get('engine') || att.engine || 'nova3';
+
+      // Sarvam streaming path (additive, flag-gated). When selected, the binary
+      // payload is raw 16kHz Int16LE PCM (not a WebM file) and is relayed frame
+      // by frame to the per-channel Sarvam socket; transcripts arrive async via
+      // the relay callback. nova-3 remains the default and the fallback engine.
+      if (useEngine === 'sarvam' && sarvamEnabled(this.env)) {
+        this._relayPcm(speaker, audio);
+        return;
+      }
+
       const result = await transcribeAndClean(audio, this.env, useLang, useMode);
 
       // B6 — record counts, latency and empty-result rate (never audio content).
@@ -411,6 +442,7 @@ export class SessionDO {
   async _suspend(reason) {
     this._flushMetrics('suspend:' + reason);
     this._seam = { me: [], others: [] };
+    this._closeSarvam();
     await this.state.storage.put({ capturing: false, status: 'paused', graceUntil: null });
     this._sendToHelpers({ type: 'capture', action: 'stop' });
     const st = await this._loadState();
@@ -428,6 +460,41 @@ export class SessionDO {
     const text = JSON.stringify(msg);
     for (const ws of this._helpers()) {
       try { ws.send(text); } catch (_) {}
+    }
+  }
+
+  // Relay one raw 16kHz Int16LE PCM frame to the per-channel Sarvam socket,
+  // creating the relay on first frame. Transcripts return async via onTranscript.
+  _relayPcm(speaker, pcmBytes) {
+    let r = this._sarvam[speaker];
+    if (!r) {
+      r = new StreamingTranscriber({
+        apiKey: this.env.SARVAM_API_KEY,
+        channel: speaker,
+        mode: this.env.SARVAM_MODE || 'codemix',
+        languageCode: this.env.SARVAM_LANG || 'hi-IN',
+        codec: this.env.SARVAM_CODEC || 'pcm_s16le',
+        encoding: this.env.SARVAM_ENCODING || 'audio/x-raw',
+        sampleRate: 16000,
+        highVad: true,
+        vadSignals: true,
+        debug: sarvamDebug(this.env),
+        onTranscript: ({ text }) => {
+          if (text) this._sendToBrowsers({ type: 'transcript', speaker, raw: text, cleaned: text, provider: 'sarvam' });
+        },
+        onError: ({ code, reason, fatal }) => {
+          if (fatal) this._sendToBrowsers({ type: 'engine_error', engine: 'sarvam', speaker, code, message: reason });
+        },
+      });
+      this._sarvam[speaker] = r;
+    }
+    r.push(pcmBytes);
+  }
+
+  _closeSarvam() {
+    for (const k of ['me', 'others']) {
+      const r = this._sarvam && this._sarvam[k];
+      if (r) { try { r.close(); } catch (_) {} this._sarvam[k] = null; }
     }
   }
 
