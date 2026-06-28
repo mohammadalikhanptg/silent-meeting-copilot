@@ -22,6 +22,10 @@
 const RECONNECT_CODES = new Set([1006, 1011]);
 const BACKOFF_MS = [500, 1000, 2000, 4000, 8000];
 const MAX_RECONNECTS = 5;
+// Floor between lazy (push-triggered) reconnect attempts. Frames arrive ~every
+// 100ms, so without this a socket that opens then immediately closes would
+// reconnect ~10x/sec and trip provider rate limits (observed: Sarvam close 1003).
+const MIN_RECONNECT_GAP_MS = 1000;
 
 // Chunked base64 for Int16 PCM. String.fromCharCode.apply blows the stack on
 // large inputs, so we window it. Frames are ~100ms (3200 bytes) so this is cheap.
@@ -79,11 +83,16 @@ export class StreamingTranscriber {
   }
 
   _buildAudioMessage(int16Bytes) {
-    // AudioData wire schema: { data: <base64>, sample_rate, encoding }.
+    // AudioData wire schema (Sarvam AsyncAPI speechToTextStreaming_audioMessage):
+    // the AudioData object MUST be nested under an `audio` key. Sending the fields
+    // at the top level makes Sarvam report "Invalid request: 'audio' must not be
+    // None" and close the stream. Required fields: data, sample_rate, encoding.
     return JSON.stringify({
-      data: bytesToBase64(int16Bytes),
-      sample_rate: this.opts.sampleRate || 16000,
-      encoding: this.opts.encoding || 'audio/x-raw',
+      audio: {
+        data: bytesToBase64(int16Bytes),
+        sample_rate: this.opts.sampleRate || 16000,
+        encoding: this.opts.encoding || 'audio/wav',
+      },
     });
   }
 
@@ -97,6 +106,16 @@ export class StreamingTranscriber {
 
     const type = (msg.type || msg.event || '').toString().toUpperCase();
     const signal = (msg.signal || msg.data?.signal || '').toString().toUpperCase();
+
+    // Provider pipeline / validation errors arrive as {type:'error', data:{message}}.
+    // Surface them (fatal) so the operator sees the real cause instead of a silently
+    // dead panel, and so format probes can detect a rejected audio frame.
+    if (type === 'ERROR') {
+      const emsg = (msg.data?.message || msg.message || 'provider pipeline error').toString();
+      this._log('provider error', emsg);
+      try { this.opts.onError && this.opts.onError({ channel: this.channel, code: 0, reason: 'Sarvam: ' + emsg, fatal: true }); } catch (_) {}
+      return;
+    }
 
     // Speech start/end events (vad_signals=true).
     if (type === 'EVENTS' || signal === 'START_SPEECH' || signal === 'END_SPEECH' || type === 'START_SPEECH' || type === 'END_SPEECH') {
@@ -116,6 +135,7 @@ export class StreamingTranscriber {
   async _connect() {
     if (this.ws && this.state === 'open') return;
     if (this._opening) return this._opening;
+    this._lastConnectAt = Date.now();
     this._opening = (async () => {
       this._status(this._reconnects ? 'reconnecting' : 'connecting');
       const url = this._buildUrl();
@@ -191,7 +211,12 @@ export class StreamingTranscriber {
   async push(int16Bytes) {
     if (this._closing) return;
     if (!this.ws || this.state !== 'open') {
-      this._connect().catch((e) => this._log('connect failed', e && e.message));
+      // Throttle push-triggered reconnects so a socket that opens then immediately
+      // closes cannot reconnect every frame and trip the provider rate limit.
+      const now = Date.now();
+      if (this.state !== 'connecting' && (now - (this._lastConnectAt || 0)) >= MIN_RECONNECT_GAP_MS) {
+        this._connect().catch((e) => this._log('connect failed', e && e.message));
+      }
       return;
     }
     try { this.ws.send(this._buildAudioMessage(int16Bytes)); }
