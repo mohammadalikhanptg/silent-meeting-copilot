@@ -1,6 +1,6 @@
 {
   "name": "smc-helper",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "description": "Silent Meeting Copilot — desktop audio capture helper",
   "main": "main.js",
@@ -20,6 +20,7 @@
   "build": {
     "appId": "london.pacific.smc-helper",
     "productName": "SMC Helper",
+    "artifactName": "${productName}-${version}.${ext}",
     "win": {
       "target": [
         "nsis"
@@ -28,7 +29,10 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "SMC-Helper-Setup.${ext}"
     },
     "mac": {
       "target": [
@@ -37,7 +41,11 @@
       ],
       "identity": null,
       "category": "public.app-category.productivity",
-      "icon": "assets/icon.icns"
+      "icon": "assets/icon.icns",
+      "artifactName": "SMC-Helper-mac.${ext}"
+    },
+    "dmg": {
+      "artifactName": "SMC-Helper.${ext}"
     }
   }
 }

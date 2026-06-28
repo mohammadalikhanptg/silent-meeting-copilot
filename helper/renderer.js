@@ -52,6 +52,13 @@ let chanMe = null, chanOt = null;   // per-channel segmentation controllers
 let meterMe = null, meterOt = null, rafId = null;
 let segMetrics = null;              // B6 — per-channel segment counters
 
+// Sarvam streaming engine: the cockpit tells us the engine on capture start.
+// When it is 'sarvam' we stream raw 16kHz PCM (AudioWorklet) for both ME and
+// OTHERS instead of the WebM/Opus segment loop. Default stays nova-3.
+let sessionEngine = 'nova3';
+let pcmCtx = null;
+let pcmGraph = [];   // audio nodes to disconnect on teardown
+
 const speech = {
   me: { spk: false, spkSince: 0, seg: false, last: 0 },
   others: { spk: false, spkSince: 0, seg: false, last: 0 },
@@ -174,12 +181,14 @@ function handleEngineMessage(msg) {
     case 'capture':
       if (msg.action === 'start') {
         demoted = false;
+        if (msg.engine) sessionEngine = msg.engine;
         beginCapture();
       } else if (msg.action === 'stop') {
         endCapture(true);
         refreshState();
       } else if (msg.action === 'config') {
-        log(`Session language/mode updated by cockpit (${msg.mode || 'auto'}).`);
+        if (msg.engine) sessionEngine = msg.engine;
+        log(`Session language/mode updated by cockpit (${msg.mode || 'auto'}, engine ${sessionEngine}).`);
       }
       break;
     case 'helper_demoted':
@@ -278,12 +287,54 @@ async function beginCapture() {
   capturing = true;
   refreshState();
   resetMetrics();
+  if (sessionEngine === 'sarvam') {
+    try {
+      await beginPcmCapture();
+      log('Capturing (Sarvam streaming PCM).');
+    } catch (e) {
+      log('Could not start Sarvam PCM capture: ' + e.message);
+    }
+    return;
+  }
   const mime = pickMime();
   chanMe = makeChannel(micStream, 'me', mime);
   if (othersStream && othersStream.getAudioTracks().length) {
     chanOt = makeChannel(othersStream, 'others', mime);
   }
   log('Capturing.');
+}
+
+// ── Sarvam PCM capture (raw 16kHz Int16LE frames via AudioWorklet) ────────────
+// Mirrors the web cockpit's worklet path. One AudioContext at 16kHz resamples
+// both the mic and the loopback stream; the worklet posts ~100ms Int16 frames
+// which we wrap with the speaker byte and stream continuously (Sarvam's VAD does
+// the segmentation server-side, so no client silence-gating here).
+async function beginPcmCapture() {
+  pcmCtx = new AudioContext({ sampleRate: 16000 });
+  await pcmCtx.audioWorklet.addModule('pcm16k-worklet.js');
+  const addChannel = (stream, speaker) => {
+    if (!stream || !stream.getAudioTracks().length) return;
+    const src = pcmCtx.createMediaStreamSource(stream);
+    const node = new AudioWorkletNode(pcmCtx, 'pcm16k');
+    node.port.onmessage = (e) => {
+      const buf = e.data;
+      if (!buf || ws?.readyState !== WebSocket.OPEN) return;
+      try { ws.send(encodeFrame(speaker, buf)); } catch (_) {}
+    };
+    const sink = pcmCtx.createGain();
+    sink.gain.value = 0;            // muted sink keeps the graph pulled
+    src.connect(node); node.connect(sink); sink.connect(pcmCtx.destination);
+    pcmGraph.push(src, node, sink);
+  };
+  addChannel(micStream, 'me');
+  addChannel(othersStream, 'others');
+}
+
+function stopPcmCapture() {
+  for (const n of pcmGraph) { try { n.disconnect(); } catch (_) {} }
+  pcmGraph = [];
+  try { pcmCtx?.close(); } catch (_) {}
+  pcmCtx = null;
 }
 
 function encodeFrame(speaker, arrayBuffer) {
@@ -366,6 +417,7 @@ function endCapture(keepStreams) {
   flushMetrics('stop');
   stopChannel(chanMe); chanMe = null;
   stopChannel(chanOt); chanOt = null;
+  stopPcmCapture();
   if (!keepStreams) disarm();
   if (barMe) barMe.style.width = '0';
   if (barOt) barOt.style.width = '0';
@@ -424,7 +476,12 @@ async function swapMic() {
     meterMe = setupMeter(micStream, barMe, 'me');
     log('Microphone switched.');
     if (wasCapturing) {
-      chanMe = makeChannel(micStream, 'me', pickMime());
+      if (sessionEngine === 'sarvam') {
+        stopPcmCapture();
+        await beginPcmCapture();
+      } else {
+        chanMe = makeChannel(micStream, 'me', pickMime());
+      }
     }
   } catch (e) {
     log('Could not switch microphone: ' + e.message);

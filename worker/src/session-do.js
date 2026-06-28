@@ -109,13 +109,14 @@ export class SessionDO {
   }
 
   async _loadState() {
-    const m = await this.state.storage.get(['managed','capturing','status','mode','lang','epoch','activeHelperId','captureStartedAt','graceUntil']);
+    const m = await this.state.storage.get(['managed','capturing','status','mode','lang','engine','epoch','activeHelperId','captureStartedAt','graceUntil']);
     return {
       managed: m.get('managed') === true,
       capturing: m.get('capturing') === true,
       status: m.get('status') || 'idle',
       mode: m.get('mode') || 'auto',
       lang: m.has('lang') ? m.get('lang') : null,
+      engine: m.get('engine') || 'nova3',
       epoch: m.get('epoch') || 0,
       activeHelperId: m.get('activeHelperId') || null,
       captureStartedAt: m.get('captureStartedAt') || 0,
@@ -168,7 +169,7 @@ export class SessionDO {
   }
 
   _sendCaptureStart(ws, st) {
-    try { ws.send(JSON.stringify({ type: 'capture', action: 'start', mode: st.mode || 'auto', lang: st.lang ?? null })); } catch (_) {}
+    try { ws.send(JSON.stringify({ type: 'capture', action: 'start', mode: st.mode || 'auto', engine: st.engine || 'nova3', lang: st.lang ?? null })); } catch (_) {}
   }
 
   // Elect `server` (cid) as the single active helper; demote any others.
@@ -212,8 +213,8 @@ export class SessionDO {
             if (ctrl.engine !== undefined) patch.engine = ctrl.engine || 'nova3';
             if (Object.keys(patch).length) await this.state.storage.put(patch);
             if ((await this.state.storage.get('capturing')) === true) {
-              const sess = await this.state.storage.get(['mode','lang']);
-              this._sendToHelpers({ type: 'capture', action: 'config', mode: sess.get('mode') || 'auto', lang: sess.has('lang') ? sess.get('lang') : null });
+              const sess = await this.state.storage.get(['mode','lang','engine']);
+              this._sendToHelpers({ type: 'capture', action: 'config', mode: sess.get('mode') || 'auto', engine: sess.get('engine') || 'nova3', lang: sess.has('lang') ? sess.get('lang') : null });
             }
           }
           return;
@@ -273,6 +274,7 @@ export class SessionDO {
             const patch = { managed: true, capturing: true, status: 'active', captureStartedAt: now, graceUntil: null };
             if (ctrl.mode !== undefined) patch.mode = ctrl.mode || 'auto';
             if (ctrl.lang !== undefined) patch.lang = ctrl.lang || null;
+            if (ctrl.engine !== undefined) patch.engine = ctrl.engine || 'nova3';
             await this.state.storage.put(patch);
             let st = await this._loadState();
             const helpers = this._helpers();
