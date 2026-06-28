@@ -355,8 +355,18 @@ export class SessionDO {
       // payload is raw 16kHz Int16LE PCM (not a WebM file) and is relayed frame
       // by frame to the per-channel Sarvam socket; transcripts arrive async via
       // the relay callback. nova-3 remains the default and the fallback engine.
-      if (useEngine === 'sarvam' && sarvamEnabled(this.env)) {
-        this._relayPcm(speaker, audio);
+      if (useEngine === 'sarvam') {
+        if (sarvamEnabled(this.env)) {
+          this._relayPcm(speaker, audio);
+        } else {
+          // Engine selected but disabled by flag: the payload is raw PCM, which
+          // the nova-3 decoder cannot read. Drop it and warn once rather than
+          // feed PCM to the Opus path and emit garbage transcripts.
+          if (!this._sarvamFlagWarned) {
+            this._sarvamFlagWarned = true;
+            this._sendToBrowsers({ type: 'engine_error', engine: 'sarvam', fatal: false, message: 'Sarvam engine is selected but not enabled on the server. No transcription is running. Switch the engine to Standard, or enable Sarvam on the server.' });
+          }
+        }
         return;
       }
 

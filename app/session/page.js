@@ -64,6 +64,7 @@ export default function SessionPage() {
   const [meetingId, setMeetingId] = useState(null); // set from ?m= param or on create
   const [title, setTitle] = useState('');
   const [mode, setMode] = useState('english');
+  const [engine, setEngine] = useState('nova3'); // 'nova3' (default) | 'sarvam' (Hindi streaming beta)
   const [modeType, setModeType] = useState('meeting');
   const [objective, setObjective] = useState('');
   const [contextNotes, setContextNotes] = useState('');
@@ -116,6 +117,10 @@ export default function SessionPage() {
   const tokenRef = useRef(null);
   const heartbeatTimer = useRef(null);
   const complianceAckRef = useRef(false);
+  // Sarvam streaming engine: AudioWorklet 16kHz PCM capture graph (ME channel)
+  const audioCtxRef = useRef(null);
+  const workletNodeRef = useRef(null);
+  const pcmSinkRef = useRef(null);
 
   useEffect(() => { meLinesRef.current = meLines; }, [meLines]);
   useEffect(() => { othersLinesRef.current = othersLines; }, [othersLines]);
@@ -644,7 +649,7 @@ export default function SessionPage() {
           try { wsRef.current.close(); } catch (_) {}
         }
 
-        const qs = new URLSearchParams({ mode: sessionMode, role: 'browser' });
+        const qs = new URLSearchParams({ mode: sessionMode, role: 'browser', engine });
         const langHint = MODE_LANG[sessionMode];
         if (langHint) qs.set('lang', langHint);
         const wsUrl = ENGINE_URL.replace(/^http/, 'ws') + `/app/ws?${qs}`;
@@ -662,7 +667,7 @@ export default function SessionPage() {
           reconnectCount.current = 0;
           setWsConnected(true);
           setError('');
-          try { ws.send(JSON.stringify({ type: 'control', action: resume ? 'resume' : 'start', mode: sessionMode, lang: MODE_LANG[sessionMode] || null })); } catch (_) {}
+          try { ws.send(JSON.stringify({ type: 'control', action: resume ? 'resume' : 'start', mode: sessionMode, engine, lang: MODE_LANG[sessionMode] || null })); } catch (_) {}
           startHeartbeat();
 
           ws.onmessage = (evt) => {
@@ -731,6 +736,9 @@ export default function SessionPage() {
                     }).catch(() => {});
                   }
                 }
+              } else if (msg.type === 'engine_error') {
+                setError(msg.message || 'Transcription engine error.');
+                if (msg.fatal) updateStatus('error');
               } else if (msg.type === 'helper_status') {
                 suppressMicRef.current = !!msg.connected;
                 setHelperConnected(!!msg.connected);
@@ -785,6 +793,45 @@ export default function SessionPage() {
         audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true },
       });
       streamRef.current = stream;
+
+      // Sarvam streaming engine: feed raw 16kHz PCM via AudioWorklet instead of
+      // the WebM/Opus MediaRecorder segment loop. The worklet posts Int16 frames
+      // (~100ms) which we wrap with the speaker byte and send as binary frames.
+      if (engine === 'sarvam') {
+        try {
+          updateStatus('live');
+          const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+          audioCtxRef.current = audioCtx;
+          await audioCtx.audioWorklet.addModule('/pcm16k-worklet.js');
+          const srcNode = audioCtx.createMediaStreamSource(stream);
+          const worklet = new AudioWorkletNode(audioCtx, 'pcm16k');
+          workletNodeRef.current = worklet;
+          worklet.port.onmessage = (e) => {
+            const buf = e.data; // ArrayBuffer of Int16LE PCM
+            if (!buf || suppressMicRef.current) return;
+            if (wsRef.current?.readyState === WebSocket.OPEN) {
+              try { wsRef.current.send(encodeChunk('me', buf)); } catch (_) {}
+            }
+          };
+          // Pull the graph with a muted sink so the worklet keeps receiving audio.
+          const sink = audioCtx.createGain();
+          sink.gain.value = 0;
+          pcmSinkRef.current = sink;
+          srcNode.connect(worklet);
+          worklet.connect(sink);
+          sink.connect(audioCtx.destination);
+          return;
+        } catch (err) {
+          setError('Sarvam capture failed: ' + String(err));
+          updateStatus('error');
+          try { audioCtxRef.current?.close(); } catch (_) {}
+          audioCtxRef.current = null; workletNodeRef.current = null; pcmSinkRef.current = null;
+          streamRef.current?.getTracks().forEach(t => t.stop());
+          wsRef.current = null; streamRef.current = null;
+          return;
+        }
+      }
+
       const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
         ? 'audio/webm;codecs=opus' : 'audio/ogg;codecs=opus';
 
@@ -823,7 +870,7 @@ export default function SessionPage() {
       streamRef.current?.getTracks().forEach(t => t.stop());
       wsRef.current = null; recorderRef.current = null; streamRef.current = null;
     }
-  }, [sessionCode, mode, objective, contextNotes, title, updateStatus, getEngineToken, startHeartbeat, stopHeartbeat]);
+  }, [sessionCode, mode, engine, objective, contextNotes, title, updateStatus, getEngineToken, startHeartbeat, stopHeartbeat]);
 
   // Pre-start readiness monitor: keep a lightweight browser connection open
   // during preparation so helper presence + readiness reflect reality BEFORE
@@ -835,7 +882,7 @@ export default function SessionPage() {
     (async () => {
       try { await getEngineToken(); } catch (_) { return; }
       if (cancelled) return;
-      const qs = new URLSearchParams({ mode, role: 'browser' });
+      const qs = new URLSearchParams({ mode, role: 'browser', engine });
       const langHint = MODE_LANG[mode];
       if (langHint) qs.set('lang', langHint);
       // H2: carry the engine token in the WebSocket subprotocol, never the URL.
@@ -855,7 +902,7 @@ export default function SessionPage() {
       if (ws) { try { ws.close(); } catch (_) {} }
       if (monitorWsRef.current) { try { monitorWsRef.current.close(); } catch (_) {} monitorWsRef.current = null; }
     };
-  }, [sessionCode, status, paused, mode, getEngineToken]);
+  }, [sessionCode, status, paused, mode, engine, getEngineToken]);
 
   const stopSession = useCallback(() => {
     intentionalStop.current = true;
@@ -863,6 +910,10 @@ export default function SessionPage() {
     if (reconnectTimer.current) { clearTimeout(reconnectTimer.current); reconnectTimer.current = null; }
     stopHeartbeat();
     recorderRef.current?.stop();
+    try { workletNodeRef.current?.disconnect(); } catch (_) {}
+    try { pcmSinkRef.current?.disconnect(); } catch (_) {}
+    try { audioCtxRef.current?.close(); } catch (_) {}
+    audioCtxRef.current = null; workletNodeRef.current = null; pcmSinkRef.current = null;
     streamRef.current?.getTracks().forEach(t => t.stop());
     if (wsRef.current && wsRef.current.readyState < WebSocket.CLOSING) {
       try { wsRef.current.send(JSON.stringify({ type: 'control', action: 'stop' })); } catch (_) {}
@@ -1047,6 +1098,19 @@ export default function SessionPage() {
                 <option value="english">English (fast)</option>
                 <option value="hindi-urdu">Hindi / Urdu (multilingual)</option>
                 <option value="auto">Auto-detect</option>
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span style={styles.selectorLabel}>Engine</span>
+              <select
+                value={engine}
+                onChange={e => setEngine(e.target.value)}
+                style={styles.select}
+                disabled={isLive || isConnecting}
+              >
+                <option value="nova3">Standard (Nova-3)</option>
+                <option value="sarvam">Hindi streaming (Sarvam beta)</option>
               </select>
             </div>
 
