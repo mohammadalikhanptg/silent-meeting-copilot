@@ -26,6 +26,16 @@ const MODE_LABEL = { english: 'English (fast)', 'hindi-urdu': 'Hindi / Urdu', au
 // Cockpit panels that can be re-ordered vertically in opt-in "Arrange" mode.
 // Order is the default top-to-bottom layout; persisted per-device in localStorage.
 const COCKPIT_PANELS = ['transcripts', 'coaching', 'assist', 'followup'];
+
+// Render a suggestion string, turning **phrase** markers into a green highlight so the
+// single most important phrase can be grabbed at a glance while talking.
+function renderHighlighted(text) {
+  if (typeof text !== 'string') return text;
+  const parts = text.split(/\*\*([^*]+)\*\*/g);
+  return parts.map((p, i) => (i % 2 === 1
+    ? <mark key={i} style={{ background: 'rgba(34,197,94,0.22)', color: '#bbf7d0', fontWeight: 700, padding: '0 5px', borderRadius: 4 }}>{p}</mark>
+    : <span key={i}>{p}</span>));
+}
 const PANEL_LABELS = {
   transcripts: 'Transcripts',
   coaching: 'Coaching',
@@ -73,6 +83,7 @@ export default function SessionPage() {
   const [meLines, setMeLines] = useState([]);
   const [othersLines, setOthersLines] = useState([]);
   const [coaching, setCoaching] = useState(null);
+  const [driftStreak, setDriftStreak] = useState(0);
   const [assistCards, setAssistCards] = useState([]);
   const [copiedAssist, setCopiedAssist] = useState(null);
   const [flaggedItems, setFlaggedItems] = useState([]);
@@ -273,6 +284,7 @@ export default function SessionPage() {
             if (fresh.length > 0) setAssistCards(prev => [...prev, ...fresh]);
           }
           setCoaching({ ...data, updatedAt: new Date().toLocaleTimeString() });
+          setDriftStreak(prev => (data?.selfCorrection?.drifting ? prev + 1 : 0));
         }
       } catch (_) {}
     };
@@ -596,6 +608,7 @@ export default function SessionPage() {
       setMeLines([]);
       setOthersLines([]);
       setCoaching(null);
+      setDriftStreak(0);
       setAssistCards([]);
       setFlaggedItems([]);
       seenAssistKeys.current = new Set();
@@ -1455,9 +1468,54 @@ export default function SessionPage() {
               {isLive && !coaching && <span style={styles.coachTs}>First update in ~{COACH_MIN_SEGMENTS} segments…</span>}
             </div>
             {coaching ? (
-              <div style={styles.coachBody}>
-                <div style={styles.coachSection}>
-                  <div style={styles.coachSectionLabel}>Talk balance</div>
+              <div style={styles.coachStack}>
+                {/* Suggested responses — most important; objective alignment embedded below */}
+                <div style={styles.coachBlock}>
+                  <div style={styles.coachSectionLabel}>{coachLabels.sugg}</div>
+                  {coaching.suggestions?.length > 0 ? (
+                    <ul style={styles.suggList}>
+                      {coaching.suggestions.map((sug, i) => (
+                        <li key={i} style={styles.suggItem}>{renderHighlighted(sug)}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div style={styles.coachNone}>Suggestions will appear as the conversation develops.</div>
+                  )}
+                  {coaching.alignment && (
+                    <div style={styles.alignEmbed}>
+                      <div style={styles.alignLabel}>Objective alignment</div>
+                      <div style={styles.alignText}>{coaching.alignment}</div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Stay on track — watches ME's own speech; escalates if ignored */}
+                {coaching.selfCorrection?.drifting && coaching.selfCorrection?.message ? (
+                  <div style={driftStreak >= 2 ? styles.trackBlockAlert : styles.trackBlock}>
+                    <div style={styles.trackLabel}>{driftStreak >= 2 ? 'Stay on track — you are drifting' : 'Stay on track'}</div>
+                    <div style={driftStreak >= 2 ? styles.trackMsgAlert : styles.trackMsg}>{coaching.selfCorrection.message}</div>
+                  </div>
+                ) : (
+                  <div style={styles.trackBlockOk}>
+                    <div style={styles.trackLabel}>Stay on track</div>
+                    <div style={styles.trackOkText}>On objective. Keep going.</div>
+                  </div>
+                )}
+
+                {/* Open items from others */}
+                <div style={styles.coachBlock}>
+                  <div style={styles.coachSectionLabel}>{coachLabels.open}</div>
+                  {coaching.openItems?.length > 0 ? (
+                    <ul style={styles.coachList}>
+                      {coaching.openItems.map((item, i) => <li key={i} style={styles.coachItem}>{item}</li>)}
+                    </ul>
+                  ) : (
+                    <div style={styles.coachNone}>None detected</div>
+                  )}
+                </div>
+
+                {/* Talk balance — slim, optional */}
+                <div style={styles.coachBlockSlim}>
                   <div style={styles.balanceRow}>
                     <span style={{ ...styles.balanceLabel, color: '#22c55e' }}>You {coaching.talkBalance?.mePercent ?? 50}%</span>
                     <div style={styles.balanceBar}>
@@ -1465,46 +1523,12 @@ export default function SessionPage() {
                     </div>
                     <span style={{ ...styles.balanceLabel, color: '#38bdf8' }}>Others {coaching.talkBalance?.othersPercent ?? 50}%</span>
                   </div>
+                  {correctionCount > 0 && (
+                    <div style={styles.repairNote}>{correctionCount} OTHERS turn{correctionCount !== 1 ? 's' : ''} auto-corrected from your restatements.</div>
+                  )}
                 </div>
-                {correctionCount > 0 && (
-                  <div style={styles.coachSection}>
-                    <div style={styles.coachSectionLabel}>Transcript repairs</div>
-                    <div style={{ fontSize: 12, color: '#34d399', lineHeight: 1.5 }}>
-                      {correctionCount} OTHERS turn{correctionCount !== 1 ? 's' : ''} auto-corrected from your restatements.
-                    </div>
-                  </div>
-                )}
-                {coaching.openItems?.length > 0 && (
-                  <div style={styles.coachSection}>
-                    <div style={styles.coachSectionLabel}>{coachLabels.open}</div>
-                    <ul style={styles.coachList}>
-                      {coaching.openItems.map((item, i) => <li key={i} style={styles.coachItem}>{item}</li>)}
-                    </ul>
-                  </div>
-                )}
-                {coaching.openItems?.length === 0 && (
-                  <div style={styles.coachSection}>
-                    <div style={styles.coachSectionLabel}>{coachLabels.open}</div>
-                    <div style={styles.coachNone}>None detected</div>
-                  </div>
-                )}
-                {coaching.suggestions?.length > 0 && (
-                  <div style={styles.coachSection}>
-                    <div style={styles.coachSectionLabel}>{coachLabels.sugg}</div>
-                    <ul style={styles.coachList}>
-                      {coaching.suggestions.map((s, i) => (
-                        <li key={i} style={{ ...styles.coachItem, color: 'var(--tx)', fontWeight: 500 }}>{s}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {coaching.alignment && (
-                  <div style={styles.coachSection}>
-                    <div style={styles.coachSectionLabel}>Objective alignment</div>
-                    <div style={styles.coachAlignment}>{coaching.alignment}</div>
-                  </div>
-                )}
               </div>
+
             ) : (
               <div style={{ padding: '12px 16px', color: '#9aa0a6', fontSize: 13 }}>
                 {isLive ? 'Coaching will appear after a few transcript segments.' : 'No coaching data for this session.'}
@@ -1818,6 +1842,22 @@ const styles = {
   coachItem: { marginBottom: 8 },
   coachNone: { fontSize: 13, color: 'var(--tx-3)', fontStyle: 'italic' },
   coachAlignment: { fontSize: 14.5, color: 'var(--warn)', lineHeight: 1.6 },
+  coachStack: { display: 'block' },
+  coachBlock: { padding: '16px 18px', borderBottom: '1px solid rgba(255,255,255,0.06)' },
+  coachBlockSlim: { padding: '10px 18px', borderBottom: '1px solid rgba(255,255,255,0.06)' },
+  suggList: { margin: 0, paddingLeft: 22, fontSize: 17, lineHeight: 1.75, color: 'var(--tx)' },
+  suggItem: { marginBottom: 12, fontWeight: 500 },
+  alignEmbed: { marginTop: 14, paddingTop: 12, borderTop: '1px dashed rgba(255,255,255,0.14)' },
+  alignLabel: { fontSize: 11, fontWeight: 700, color: 'var(--warn)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 },
+  alignText: { fontSize: 14.5, color: 'var(--warn)', lineHeight: 1.6 },
+  trackBlock: { padding: '14px 18px', borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(245,158,11,0.07)' },
+  trackBlockAlert: { padding: '18px', borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(239,68,68,0.16)', boxShadow: 'inset 0 0 0 1px rgba(239,68,68,0.55)' },
+  trackBlockOk: { padding: '12px 18px', borderBottom: '1px solid rgba(255,255,255,0.06)' },
+  trackLabel: { fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6, color: 'var(--tx-2)' },
+  trackMsg: { fontSize: 16, color: '#fbbf24', lineHeight: 1.6, fontWeight: 600 },
+  trackMsgAlert: { fontSize: 21, color: '#fecaca', lineHeight: 1.55, fontWeight: 800 },
+  trackOkText: { fontSize: 13, color: 'var(--tx-3)', fontStyle: 'italic' },
+  repairNote: { marginTop: 8, fontSize: 12, color: '#34d399' },
   // Assist panel (outer div uses className="smc-assist-panel")
   assistHeader: { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', borderBottom: '1px solid var(--assist-border)', flexWrap: 'wrap' },
   assistTitle: { fontSize: 13, fontWeight: 600, color: 'var(--assist)' },
