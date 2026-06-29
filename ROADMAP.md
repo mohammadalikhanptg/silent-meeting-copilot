@@ -385,3 +385,25 @@ Establish MCP connectivity so Claude and ChatGPT can drive SMC end to end with n
 
 ### 28 Jun 2026 (autonomous continuation) - Marathon-session rolling summary SHIPPED (commit 7675c47, worker d2cfb5cb)
 Coach context management Layer 2 delivered per the approved re-architecture + Codex review. generateCoaching folds aged-out turns into a compact running summary on a cheaper model and sends [summary + bounded recent window]; payload/latency stay flat to ~90min (verified offline, window <=49 lines/speaker, monotonic cursor, no gaps). Client-held state, additive with fallback. NEXT: per-block drag-reorder of the coaching sub-blocks (t-smc-coaching-inner-block-drag-reorder), frontend-only, queued.
+
+
+## Sweep & reconciliation — 29 Jun 2026 (Opus restore, persistence greenlit, meeting-bot state recovered)
+
+Triggered by an operator review that found the meeting-bot workstream absent from the latest handoff. Full sweep of Sanity + repo done; findings recorded here so nothing is lost again.
+
+Shipped this session:
+- Coaching restored to Opus. callAnthropic was always sending the deprecated `temperature` param, which Opus 4.8 rejects (HTTP 400), so every Opus call failed and coaching silently ran on the Sonnet fallback. Fixed: temperature is omitted for Opus-class and Mythos/Fable models, sent only to models that accept it. Coaching now runs on Opus (operator: top model is the non-negotiable quality bar). Commit dd05feb, worker version 7e0017a0.
+- Operator name replaces "ME" across cockpit, saved meeting and transcript export, via a new editable profile field (display_name) with an idempotent self-migration; falls back to "Me" until set. Commit 527b5a3, Vercel READY. (Operator must type their name once in Profile > Your name; the SMC DB credential is not reachable outside Vercel, so it could not be seeded server-side.)
+
+Greenlit (operator, 29 Jun): in-product audio + transcript persistence (oc2) is the NEXT build, as the hard pre-req for both the MCP orchestration phase (oc1/oc3) and any Fireflies accuracy benchmark.
+
+Meeting-bot — TRUE STATE (was missing from the 28 Jun handoff and absent as a phase in the Sanity projectRoadmap):
+- Built and merged: bot scaffolding (PR #5 — self-hosted provider-adapter, FakeAdapter, consent gate, session-bound bot credential mirroring H4, engine bot-ingest seam, double-gated, flag BOT_CAPTURE_ENABLED=false) and the binary participant-frame envelope (PR #7). Synthetic-only, no /bot/ws route, REAL_CAPTURE_IMPLEMENTED=false both engine and runtime. Design: docs/meeting-bot-design.md.
+- Committed direction is SELF-HOSTED (Zoom Meeting SDK first; Teams later via the same MeetingCaptureSource interface). This SUPERSEDES the earlier managed Recall.ai recommendation. The t-smc-recall-ai-meeting-bot-phase2 task name and the RECALL_WORKSPACE_VERIFICATION_SECRET operator item are STALE under the committed design.
+- DECISION TO CONFIRM with operator: stay self-hosted (cheaper per-hour at scale; needs a Linux host + per-platform adapters; Zoom first, Teams later) vs managed Recall.ai (fastest to ship, Zoom+Teams+Meet day one, per-hour pass-through cost). The code is built for self-hosted.
+- NOT built (the "capture-mode + user identity" increment was dispatched as smcbot-3/4 but never landed — no code, no report):
+  1. Operator self-identification among the bot's named per-participant streams, so the system knows which participant is ME vs OTHERS. Recommended: explicit roster pick at join, auto-suggested from the profile display name; the chosen participant maps to ME, the rest to OTHERS (optionally kept named for richer coaching/minutes).
+  2. Source mutual-exclusion / double-feed prevention: when the bot is the active source for a session, the desktop helper must drop to standby so the far end is not captured twice. Generalise the existing one-active-helper / DO capture-authorisation into one-active-SOURCE (helper XOR bot); the cockpit shows the live source.
+- Remaining bot increments (all gated behind in-product consent UI + final security review before any real participant audio): real Zoom Meeting SDK adapter + /bot/ws engine route with bot-credential auth (needs operator Zoom Marketplace SDK creds + a Linux host); wire the bot credential mint/validate into app internal endpoints against used_engine_tokens; in-product consent UI + evidence persistence; bot session lifecycle in the cockpit (join from a meeting link, leave); the two unbuilt mechanisms above. Target platforms: Zoom and Microsoft Teams.
+
+Roadmap hygiene: the Sanity projectRoadmap (427dc4bc-eb07-4ba0-9c84-78c8d1293bef) has phases foundation/engine/remote/modes/multiuser/outputs/orchestration but NO bot phase — add a "meeting-bot" phase there to mirror this entry. ~12 legacy title-only SMC backlog tasks remain in Sanity, several already delivered (CF engine pipeline, four-panel UI wiring) — close them to reduce drift.
