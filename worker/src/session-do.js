@@ -1562,13 +1562,14 @@ async function callAnthropic({ system, user, model, maxTokens = 1024, temperatur
         'anthropic-version': '2023-06-01',
         'content-type': 'application/json',
       },
-      body: JSON.stringify({
-        model: model || 'claude-opus-4-8',
-        max_tokens: maxTokens,
-        temperature,
-        system,
-        messages: [{ role: 'user', content: user }],
-      }),
+      body: JSON.stringify((() => {
+        const m = model || 'claude-opus-4-8';
+        // Opus 4.8+ and Mythos/Fable reject the deprecated `temperature` param (HTTP 400).
+        const noTemp = /opus-4-8|opus-4-9|mythos|fable/i.test(m);
+        const b = { model: m, max_tokens: maxTokens, system, messages: [{ role: 'user', content: user }] };
+        if (!noTemp && typeof temperature === 'number') b.temperature = temperature;
+        return b;
+      })()),
       signal: ctrl.signal,
     });
     if (!resp.ok) {
