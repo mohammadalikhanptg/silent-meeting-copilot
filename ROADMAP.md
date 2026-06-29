@@ -466,3 +466,19 @@ COMMERCIAL MODEL (operator direction):
 - Settings page: account, subscription tier and hours usage, billing, and per-add-on settings tabs that appear only when that add-on is active.
 
 All of the above folds into the commercial-maturation phase and is built on live. The Codex design review runs with an anti-drift instruction so it sharpens but never trims the design-skill-driven direction.
+
+
+## Checkpoint — Zoom Meeting SDK app provisioned — 30 Jun 2026
+
+Zoom General App created and configured for the self-hosted meeting bot:
+- App: "Pacific Meeting Bot" (renamed from auto-generated "General app 343"), User-managed, Development environment.
+- App ID: LC9eBx0HTTyc_EyVqUAgHA. Client ID: tzRQUuRpTZ6w1CaKVgZLg. Client Secret held in the Zoom console (operator to copy to vault; not stored in repo).
+- Meeting SDK feature ENABLED (Features > Embed > Meeting SDK). Native SDK downloads confirmed available including Linux-x86_64, Linux-arm64, Windows, Windows(c#), macOS, Electron, React Native. Covers the self-hosted Linux bot host and the existing Electron helper.
+- Zoom platform notice: from 2 Mar 2026, apps joining meetings OUTSIDE their own account must authorise via OBF/ZAK tokens or RTMS. Applies when the bot joins external customer meetings; own-account testing is unaffected. Fold into the bot join-flow design.
+- Operator follow-on (not blocking dev): copy Client ID + Secret to vault; Scopes/Basic Info completion is only needed for marketplace activation, and a private internal bot does not need to be published to the marketplace; choose OBF/ZAK vs RTMS for external joins at wiring time.
+
+NEXT ACTIONS (resume point):
+1. Codex naming review (separate, parked by operator). Effort-first shortlist done; operator standout = Soto/Sotto, needs trademark/clash research. Run cross-review, return a bigger curated set, operator then picks.
+2. Codex design v2 review (anti-drift) of the commercial spec, then present the reconciled v2 before building on live.
+3. Code signing: drive Azure Trusted Signing portal setup (account, certificate profile, CI credential). Business identity validation is the operator's part; confirm org-age eligibility for public cert profiles.
+4. In-product audio/transcript persistence (oc2) — greenlit; pre-req for the Fireflies benchmark and for orchestration.
