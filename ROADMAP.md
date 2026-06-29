@@ -444,3 +444,25 @@ Gaps to reach commercial grade (reconciled with built + planned):
 Preview delivered: smc-commercial-preview-v1.html (Home, Live cockpit, Insights, Review). Design language: ink base, indigo-to-cyan signal accent, Bricolage Grotesque display + Inter body + mono data; signature element is the "Live Focus / Say this next" coaching card with an objective-alignment meter. Awaiting operator approval plus Codex cross-review before build.
 
 New hub phases added: meeting-bot (Zoom/Teams) and commercial (maturation).
+
+
+## Design v2 feedback + commercial model + rename — 29 Jun 2026 (operator)
+
+Operator approved the v1 preview direction and authorised implementing the commercial redesign ON THE LIVE system (no branches; nothing has gone live commercially). Every existing agreed and deployed feature must be carried into the new rollout, not lost (auth, modes, remote-control + suspend/resume, outputs, Sarvam, rolling summary, security gate, bot scaffolding).
+
+RENAME (high priority, trademark risk): "Copilot" is a Microsoft trademark, so "Silent Meeting Copilot / SMC" is unsafe to commercialise. Run a dedicated naming exercise plus a separate Codex review to choose a catchy, ownable product name, then a comprehensive rename across app, UI, docs and repo references. Domain availability is secondary (plenty of TLDs; .ai acceptable). Claude shortlists first (effort-first), Codex reviews, operator picks the final name.
+
+COCKPIT (approved): keep the single merged conversation stream (not two separate boxes). The meeting bot conversation must flow in the SAME merged style; when the bot is the source, show each speaker's real NAME instead of "OTHERS". Wire the existing controls into the new design: language selection, helper-connected status, source indicator, engine selector, talk-balance, compliance acknowledgement.
+
+THREE PRODUCTS / USE CASES (one consolidated cockpit that specialises per use case):
+1. Meeting coach (base).
+2. Interview assistant — BOTH sides. (a) Interviewer side (built: candidate verification + cited evidence pack). (b) NEW interviewee side: real-time coaching that helps a candidate present themselves better in their own interview. Whichever party subscribes, the system acts on THEIR side.
+3. Customer service assistant — wire to the customer's CRM / contact-centre APIs so the caller's record is pulled in for live answering, plus product-knowledge context.
+
+COMMERCIAL MODEL (operator direction):
+- Base = the Meeting system. Tiers 1/2/3 priced on number of meetings or hours per month; Enterprise tier = bespoke pricing.
+- Add-ons (separate, stackable): Interviewer add-on, Interviewee add-on, Customer-service add-on. Subscribing to an add-on reveals its own settings section/tab and its vertical wiring.
+- A subscriber can hold multiple add-ons. Consider a minimum term (e.g. 3 months) on interviewer/interviewee with a 7 or 14-day trial; tune to demand.
+- Settings page: account, subscription tier and hours usage, billing, and per-add-on settings tabs that appear only when that add-on is active.
+
+All of the above folds into the commercial-maturation phase and is built on live. The Codex design review runs with an anti-drift instruction so it sharpens but never trims the design-skill-driven direction.
