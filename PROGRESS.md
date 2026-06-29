@@ -2322,3 +2322,11 @@ broadcast {type:'transcript', speaker, raw, cleaned, provider}
 1. **Windows helper — Windows hardware required.** WASAPI loopback audio does not work on macOS.
 2. **Deepgram key not yet set.** Hindi/Urdu mode is code-complete but gated.
 3. **Engine WebSocket has no auth.** Anyone who discovers the URL can connect. Recommended: HMAC-SHA256 session token on WS upgrade.
+
+
+## 28 Jun 2026 (autonomous continuation) - marathon-session rolling summary SHIPPED
+- generateCoaching now folds aged-out earlier turns into a compact running summary (cheaper model, COACH_SUMMARY_MODEL default claude-sonnet-4-6) and sends [summary + a bounded recent window] to the coach. Window folds to KEEP_RECENT=32 once it exceeds FOLD_TRIGGER=48 per speaker, so the Anthropic payload/latency stay flat regardless of meeting length. Verified offline over a 900/1350-turn (~90min) transcript: recent window never exceeds 49 lines/speaker, cursor monotonic, no gaps. Client holds priorSummary+summarizedThrough across /coach cycles; additive with fallback to prior summary + recent window on any failure (short meetings unchanged). Worker version d2cfb5cb, commit 7675c47.
+- Earlier this session: coaching-dies-at-~30min fixed via callAnthropic 18s AbortController timeout + client 45s timeout so a stalled Anthropic connection can no longer freeze the coach (commit 155ff9e, worker 76f16a16). Sarvam streaming wire-format fix + coaching redesign also shipped earlier (commits aaf83d1, d9d54a5).
+
+### NEXT MILESTONE (queued, NOT started): per-block drag-reorder of the coaching sub-blocks
+Task t-smc-coaching-inner-block-drag-reorder. Make the 4 coaching blocks (Suggested responses / Stay on track / Open items / Talk balance) individually drag-to-reorder with localStorage persistence. Frontend-only, low risk. Mirror the existing outer-panel drag system already in app/session/page.js (COCKPIT_PANELS, dragKeyRef, panel drag handlers, localStorage). The 4 blocks live in the coachStack between `{coaching ? (` and `) : (` in app/session/page.js; default order is sugg, track, open, balance. Implement as a single atomic patch (order state + load/persist + drag handlers + render-in-order) so there is no half-edited state.
