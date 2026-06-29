@@ -407,3 +407,40 @@ Meeting-bot — TRUE STATE (was missing from the 28 Jun handoff and absent as a 
 - Remaining bot increments (all gated behind in-product consent UI + final security review before any real participant audio): real Zoom Meeting SDK adapter + /bot/ws engine route with bot-credential auth (needs operator Zoom Marketplace SDK creds + a Linux host); wire the bot credential mint/validate into app internal endpoints against used_engine_tokens; in-product consent UI + evidence persistence; bot session lifecycle in the cockpit (join from a meeting link, leave); the two unbuilt mechanisms above. Target platforms: Zoom and Microsoft Teams.
 
 Roadmap hygiene: the Sanity projectRoadmap (427dc4bc-eb07-4ba0-9c84-78c8d1293bef) has phases foundation/engine/remote/modes/multiuser/outputs/orchestration but NO bot phase — add a "meeting-bot" phase there to mirror this entry. ~12 legacy title-only SMC backlog tasks remain in Sanity, several already delivered (CF engine pipeline, four-panel UI wiring) — close them to reduce drift.
+
+
+## Commercial maturation workstream + governance — 29 Jun 2026 (operator-initiated)
+
+Operator instruction: act as product architect and mature SMC into a commercial, investor-ready SaaS. The current UI does not yet look like a paid product. Reconcile with everything built and planned; this is a review/scale/polish/cross-review track, gated on operator approval of a preview before any build.
+
+Decisions locked this session:
+- Meeting bot: SELF-HOSTED confirmed (not managed Recall.ai). Zoom first, then Teams, via the same MeetingCaptureSource adapter. Must be modular and horizontally scalable for future demand. Recall.ai account exists for interim testing only. TEARDOWN BULLET: once self-hosted is live, delete the Recall account and remove payment cards.
+- Bot Linux host: use the existing Linux machine on worker one; no new host needed.
+- Credentials: each machine (desktop, worker, Mac) is self-sufficient; see the credential-locations skill. No chat-paste of secrets. The git-credential rotation is therefore hygiene, not a blocker, under the per-machine model.
+
+Coaching: the "stopped after first round" symptom is explained and fixed. The coach poll loop is robust (fixed interval, per-call try/catch, never dies on one error); the symptom was the Opus 400 returning empty every round before the Sonnet fallback existed. With the Sonnet fallback (commit 5425600) plus the temperature fix (commit dd05feb), every round now returns a real Opus response.
+
+Slipped/at-risk items found in the sweep (besides the bot, now recovered) — to track as tasks:
+- Helper pairing key not persisted across restarts (encrypt with safeStorage and write to disk; auto-connect on launch). Operator-stated, high.
+- Saved session prep must persist chosen LANGUAGE and ENGINE, not just context/docs.
+- Relevance-gate or remove the keyword assist cards so they never fire in a dispute (from the coaching re-architecture proposal); drive any "your info" surfacing from the coach.
+
+GOVERNANCE / AUTONOMY GUARDRAILS (operator, 29 Jun):
+- This roadmap is the single driver for autonomous runs; do not stop because the next step is unclear, and do not drift. Stick to the SMC project only; never pick up work from other Pacific projects during an SMC run.
+- Keep the Sanity projectRoadmap hub (427dc4bc-eb07-4ba0-9c84-78c8d1293bef) current as work lands; it is the operator's dashboard. Refresh it at every milestone.
+- Before implementing the commercial UI, deliver the operator a full overview plus a non-functional HTML preview for approval; build only after approval. A Codex cross-review of the design runs in parallel and must NOT trim the design-skill-driven ideas (anti-drift gate).
+
+COMMERCIAL MATURATION — gap analysis (product architect view, v1; to be cross-reviewed):
+Positioning: a private, real-time meeting strategist that coaches YOU during the conversation and verticalises into recruitment (live candidate verification) and customer service — distinct from note-takers (Otter/Fireflies) and post-call analysers (Gong). Unique-first; cover these areas properly.
+Gaps to reach commercial grade (reconciled with built + planned):
+1. Brand plus design system plus premium app shell and navigation (Home, Live, Insights, Library, Settings, Billing).
+2. Live cockpit visual rebuild to commercial grade (the hero/differentiator); Live Focus coaching as the centrepiece; mobile-first.
+3. Insights/analytics layer over saved sessions (objective-hit rate, talk-share trend, drift caught, follow-up closure, recurring-objection patterns) — a primary retention driver, currently absent.
+4. Onboarding/first-run (guided helper install, profile, first session) plus designed empty/loading/error states.
+5. Mode/template library (surface the packs as reusable playbooks).
+6. Branded, shareable outputs plus a post-meeting AI debrief.
+7. Plans/billing (Stripe), trial, trust/privacy surface, integrations hub (calendar, Zoom/Teams, CRM, MCP).
+8. Investor-ready MVP polish plus a marketing/landing surface.
+Preview delivered: smc-commercial-preview-v1.html (Home, Live cockpit, Insights, Review). Design language: ink base, indigo-to-cyan signal accent, Bricolage Grotesque display + Inter body + mono data; signature element is the "Live Focus / Say this next" coaching card with an objective-alignment meter. Awaiting operator approval plus Codex cross-review before build.
+
+New hub phases added: meeting-bot (Zoom/Teams) and commercial (maturation).
