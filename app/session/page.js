@@ -82,6 +82,7 @@ export default function SessionPage() {
   const [status, setStatus] = useState('idle');
   const [meLines, setMeLines] = useState([]);
   const [othersLines, setOthersLines] = useState([]);
+  const [meName, setMeName] = useState('Me');
   const [coaching, setCoaching] = useState(null);
   const [driftStreak, setDriftStreak] = useState(0);
   const [assistCards, setAssistCards] = useState([]);
@@ -201,6 +202,8 @@ export default function SessionPage() {
       .then(d => {
         if (d.profile) {
           profileRef.current = d.profile;
+          const _dn = (d.profile.display_name || '').trim().split(/\s+/)[0];
+          if (_dn) setMeName(_dn);
           if (!languageTouched.current && d.profile.default_language_mode) {
             setMode(d.profile.default_language_mode);
           }
@@ -1381,7 +1384,7 @@ export default function SessionPage() {
           <div className="smc-grid" style={styles.grid}>
             {/* ME panel */}
             <div className="smc-transcript-panel me-panel">
-              <div style={{ ...styles.panelHead, color: 'var(--me)' }}>ME — microphone</div>
+              <div style={{ ...styles.panelHead, color: 'var(--me)' }}>{meName} — microphone</div>
               <div ref={meScrollRef} style={styles.transcript}>
                 {meLines.length === 0 && <span style={styles.muted}>Your speech will appear here…</span>}
                 {meLines.map((l, i) => (
@@ -1680,7 +1683,7 @@ export default function SessionPage() {
                       <div style={{ flex: 1 }}>
                         <div style={styles.tpQuote}>&ldquo;{stripSpk(item.text)}&rdquo;</div>
                         <div style={styles.tpMeta}>
-                          {item.speaker === 'others' ? 'OTHERS' : 'ME'} &middot; {item.ts}
+                          {item.speaker === 'others' ? 'OTHERS' : meName} &middot; {item.ts}
                         </div>
                         {item.status === 'pending' || item.status === 'processing' ? (
                           <div style={styles.tpWorking}>

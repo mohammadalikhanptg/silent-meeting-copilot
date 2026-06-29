@@ -61,6 +61,7 @@ export default function ProfilePage() {
   const [businesses, setBusinesses] = useState([]);
   const [postalAddress, setPostalAddress] = useState('');
   const [phone, setPhone] = useState('');
+  const [displayName, setDisplayName] = useState('');
   const [emails, setEmails] = useState([]);
   const [socialLinks, setSocialLinks] = useState([]);
   const [bio, setBio] = useState('');
@@ -88,6 +89,7 @@ export default function ProfilePage() {
         setBusinesses(p.businesses || []);
         setPostalAddress(p.postal_address || '');
         setPhone(p.phone || '');
+        setDisplayName(p.display_name || '');
         setEmails(p.emails || []);
         setSocialLinks(p.social_links || []);
         setBio(p.bio || '');
@@ -126,6 +128,7 @@ export default function ProfilePage() {
           businesses,
           postal_address: postalAddress || null,
           phone: phone || null,
+          display_name: displayName || null,
           emails,
           social_links: socialLinks,
           bio: bio || null,
@@ -542,6 +545,15 @@ export default function ProfilePage() {
           <section style={styles.section}>
             <div style={styles.sectionHeader}>
               <span style={styles.sectionTitle}>Contact</span>
+            </div>
+            <div className="pf-row" style={styles.fieldRow}>
+              <label style={styles.label}>Your name</label>
+              <input
+                style={styles.input}
+                placeholder="e.g. Ali (shown instead of ME on your transcripts and cockpit)"
+                value={displayName}
+                onChange={e => setDisplayName(e.target.value)}
+              />
             </div>
             <div className="pf-row" style={styles.fieldRow}>
               <label style={styles.label}>Phone</label>

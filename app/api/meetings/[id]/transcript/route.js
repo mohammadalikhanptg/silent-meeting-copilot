@@ -16,6 +16,13 @@ export async function GET(request, { params }) {
   `;
   if (!meeting) return new Response('Not found', { status: 404 });
 
+  let meName = 'ME';
+  try {
+    const [prof] = await sql`SELECT display_name FROM user_profiles WHERE user_email = ${session.email} LIMIT 1`;
+    const dn = (prof?.display_name || '').trim().split(/\s+/)[0];
+    if (dn) meName = dn;
+  } catch (_) {}
+
   const segments = await sql`
     SELECT speaker, cleaned, corrected_text, ts
     FROM transcript_segments
@@ -26,7 +33,7 @@ export async function GET(request, { params }) {
   const date = new Date(meeting.started_at).toISOString().slice(0, 10);
   const head = `Transcript — ${meeting.title || 'Untitled session'}\n${date}\n\n`;
   const body = segments.map(s => {
-    const who = s.speaker === 'others' ? 'OTHERS' : 'ME';
+    const who = s.speaker === 'others' ? 'OTHERS' : meName;
     const text = s.speaker === 'others' ? (s.corrected_text || s.cleaned) : s.cleaned;
     const t = s.ts ? new Date(s.ts).toLocaleTimeString('en-GB') : '';
     return `[${t}] ${who}: ${text}`;

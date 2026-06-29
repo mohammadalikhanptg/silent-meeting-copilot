@@ -44,6 +44,13 @@ export default async function MeetingDetailPage({ params }) {
   `;
   if (!meeting) notFound();
 
+  let meName = 'Me';
+  try {
+    const [prof] = await sql`SELECT display_name FROM user_profiles WHERE user_email = ${session.email} LIMIT 1`;
+    const dn = (prof?.display_name || '').trim().split(/\s+/)[0];
+    if (dn) meName = dn;
+  } catch (_) {}
+
   const segments = await sql`
     SELECT speaker, raw, cleaned, corrected_text, clarified_by_me, lang, ts
     FROM transcript_segments
@@ -290,7 +297,7 @@ export default async function MeetingDetailPage({ params }) {
                   ...styles.speakerTag,
                   color: seg.speaker === 'me' ? '#22c55e' : '#38bdf8',
                 }}>
-                  {seg.speaker === 'me' ? 'ME' : 'OTHERS'}
+                  {seg.speaker === 'me' ? meName : 'OTHERS'}
                 </span>
                 <span style={styles.segTs}>{new Date(seg.ts).toLocaleTimeString()}</span>
                 <div style={{ flex: 1 }}>

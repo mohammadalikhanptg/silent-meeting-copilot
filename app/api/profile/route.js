@@ -23,6 +23,8 @@ const DEFAULT_SEED = {
 };
 
 async function getOrCreateProfile(sql, email) {
+  // Idempotent self-migration: ensure the personal display-name column exists.
+  try { await sql`ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS display_name TEXT`; } catch (_) {}
   const rows = await sql`SELECT * FROM user_profiles WHERE user_email = ${email} LIMIT 1`;
   if (rows.length > 0) return rows[0];
 
@@ -74,7 +76,7 @@ export async function PUT(request) {
   const {
     businesses, postal_address, phone, emails,
     social_links, bio, common_items, profile_reference_text,
-    default_language_mode,
+    default_language_mode, display_name,
   } = body;
 
   const sql = getSql();
@@ -96,6 +98,7 @@ export async function PUT(request) {
       common_items           = ${JSON.stringify(common_items ?? [])},
       profile_reference_text = ${profile_reference_text ?? null},
       default_language_mode  = ${dlm},
+      display_name           = ${display_name ?? null},
       updated_at             = now()
     WHERE user_email = ${session.email}
     RETURNING *
