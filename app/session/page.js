@@ -122,6 +122,8 @@ export default function SessionPage() {
   const refDocsRef = useRef([]);
   const profileRef = useRef(null);
   const seenAssistKeys = useRef(new Set());
+  const coachSummaryRef = useRef('');
+  const coachSummaryCursorRef = useRef({ me: 0, others: 0 });
   const flaggedItemsRef = useRef([]);
   const segmentTimer = useRef(null);
   const suppressMicRef = useRef(false); // true when a desktop helper is the authoritative ME source
@@ -247,6 +249,8 @@ export default function SessionPage() {
             modeType: modeTypeRef.current,
             profile: profileRef.current,
             context: contextNotesRef.current,
+            priorSummary: coachSummaryRef.current,
+            summarizedThrough: coachSummaryCursorRef.current,
             refDocs: refDocsRef.current.filter(d => d.content_text).map(d => ({
               filename: d.filename,
               content_text: d.content_text,
@@ -288,6 +292,8 @@ export default function SessionPage() {
           }
           setCoaching({ ...data, updatedAt: new Date().toLocaleTimeString() });
           setDriftStreak(prev => (data?.selfCorrection?.drifting ? prev + 1 : 0));
+          if (typeof data.rollingSummary === 'string') coachSummaryRef.current = data.rollingSummary;
+          if (data.summarizedThrough && typeof data.summarizedThrough === 'object') coachSummaryCursorRef.current = data.summarizedThrough;
         }
       } catch (_) {} finally { clearTimeout(coachTo); }
     };
@@ -612,6 +618,8 @@ export default function SessionPage() {
       setOthersLines([]);
       setCoaching(null);
       setDriftStreak(0);
+      coachSummaryRef.current = '';
+      coachSummaryCursorRef.current = { me: 0, others: 0 };
       setAssistCards([]);
       setFlaggedItems([]);
       seenAssistKeys.current = new Set();
