@@ -60,3 +60,38 @@ Gate: no real third-party or candidate data until H2 to H4 and the retention and
 
 ## 11. Build status (summary)
 Phase 1 is functionally complete end to end: capture, transcription (English and Hindi/Urdu), live coaching, minutes, action points, interview assessment, persistence and review, two polished themes, and the security baseline. The current focus is UX fine-tuning from live-test feedback and the remaining security hardening. Detailed and graded status, plus the full backlog, live in ROADMAP.md.
+
+## 12. Commercial product architecture (planned, 30 Jun 2026)
+
+Status: agreed direction, not yet built. A Codex cross-review of this architecture is in flight (correlationId cr-smc-commercial-design-20260630-0037). Build proceeds on the live system (nothing is live commercially yet), carrying every shipped feature forward.
+
+Rename: "Copilot" is a Microsoft trademark, so "Silent Meeting Copilot / SMC" is not safe to commercialise. The product name is being chosen via a dedicated naming exercise plus Codex review (correlationId cr-smc-naming-20260630-0037); operator standout so far is Soto/Sotto, pending clash research. A full rename across app, UI, docs and repo references follows the decision.
+
+Cockpit: one consolidated cockpit, single merged conversation stream (not two boxes). The meeting-bot conversation flows in the same merged style; when the bot is the source, each speaker's real NAME is shown instead of "OTHERS", degrading gracefully to "OTHERS" until the bot delivers reliable per-speaker labels. Existing controls are wired into the redesign: language selection, helper-connected status, source indicator, engine selector, talk-balance, compliance acknowledgement.
+
+Three use cases on the one cockpit:
+1. Meeting coach (base).
+2. Interview assistant, both sides: interviewer side (built: candidate verification + cited evidence pack) and a new interviewee side that coaches the candidate to present themselves better. Whoever subscribes is the side coached.
+3. Customer-service assistant: wired to the customer's CRM / contact-centre APIs to pull the caller's record live, plus product-knowledge context. Heaviest integration; later add-on.
+
+Commercial model: base = the Meeting system in usage tiers 1/2/3 priced on meetings or hours per month, plus a bespoke Enterprise tier. Stackable add-ons (Interviewer, Interviewee, Customer-service), each unlocking its own settings tab; multiple allowed. Consider a 3-month minimum term on interviewer/interviewee plus a 7 or 14-day trial. Settings page: account, subscription/usage, billing, per-add-on tabs. Billing via Stripe entitlements; add-on logic must never block or complicate the core meeting tier.
+
+Provisional build/GTM sequence: Meeting base + Interviewer first (largely built), Interviewee next (reuses the coaching engine on the operator's own audio), Customer-service last (integration-heavy).
+
+## 13. Meeting bot (self-hosted) — provider provisioning
+
+Direction: self-hosted provider-adapter bot, Zoom first then Teams; modular and horizontally scalable. A Recall.ai account exists for interim testing only and is to be torn down once self-hosted is live.
+
+Zoom Meeting SDK app provisioned (30 Jun 2026):
+- App "Pacific Meeting Bot", General App, User-managed, Development. App ID LC9eBx0HTTyc_EyVqUAgHA. Client ID tzRQUuRpTZ6w1CaKVgZLg. Client Secret held in the Zoom console and the operator vault; NOT in the repo.
+- Meeting SDK feature enabled. Native SDKs available include Linux x86_64 and arm64 (headless bot host), Windows, macOS, Electron, React Native.
+- Credential storage: the Meeting SDK JWT signature must be minted server-side, so the Client Secret lives only as a Cloudflare Worker secret on smc-engine (planned names ZOOM_SDK_CLIENT_ID, ZOOM_SDK_CLIENT_SECRET). The worker mints the short-lived signature; the bot host never holds the secret.
+- Platform rule: from 2 Mar 2026, apps joining meetings outside their own account must authorise via OBF/ZAK tokens or RTMS. Applies to joining external customer meetings (own-account testing unaffected); decide OBF/ZAK vs RTMS at wiring time.
+
+## 14. Code signing
+
+Decision: sign the Windows/Electron installers via Azure Trusted Signing (cloud signing, low monthly cost, signtool and CI friendly), in preference to a legacy CA OV/EV certificate that now forces a hardware token/HSM and is awkward to automate.
+
+Signing entity: Pacific Infotech Limited (18-year-old CSP), NOT Pacific Technology Group (~12 months old). Azure Trusted Signing's streamlined organisation validation expects roughly three or more years of verifiable business history; PTG does not yet meet it, Pacific Infotech comfortably does, and an established publisher also gives better SmartScreen reputation from day one. Trade-off: the installer's displayed publisher will read "Pacific Infotech Limited" rather than PTG or the product brand. Operator to confirm the entity before validation is submitted.
+
+Status: not started. Next: drive the Azure portal setup (resource group, Trusted Signing account, certificate profile, CI signer credential) under Pacific Infotech; the identity-validation form is the operator's part.
