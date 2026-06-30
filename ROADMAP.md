@@ -518,3 +518,26 @@ Both Codex reviews returned APPROVE-WITH-CHANGES. Anti-drift check: neither redi
 
 ### Next build milestone (teed up)
 In-product audio + transcript persistence (oc2): foundational, independent of the chosen name and the commercial UI. Persist per-session captured audio (ME + OTHERS) and the final transcript durably, with a retrieval path in the web app. Pre-req for the Fireflies accuracy benchmark and for post-meeting minutes/orchestration. Definition of done: a completed session's audio + transcript survive reload and are retrievable; replay/re-scan verified.
+
+### Naming — expanded candidate sets (30 Jun, operator requested more)
+Function anchor: a private, operator-side, real-time coach/prompter the other party never sees or hears, during live conversations (meeting, interview either side, customer service). Domains/trademarks below still need the live screening Codex ran on the first set; treat as concepts until checked.
+
+List A — innovative, tied to the function (the hidden voice/cue/earpiece):
+- Backcue (kept) — the offstage cue fed to you live; clean domains in prior screening.
+- Earwig — the concealed in-ear earpiece that quietly prompts you; the function, literally. Bold, distinctive, ownable.
+- Cuewire — the live wire of cues running into your conversation.
+- Wingside — your discreet second, at your side, in any live exchange; "wingman" without the baggage.
+- Undertone — the guidance running quietly beneath what is being said.
+- Sotto (kept) — sotto voce, the quiet private voice; premium; needs a modified domain + counsel.
+- Sussur — coined from susurrus (a whisper); premium and distinctive, the whisper in your ear.
+- Earnote — the prompt delivered in your ear, in the moment.
+
+List B — simpler, direct, domain-led (the meetings.guru / meetings.coach style):
+- live.coach — "coach you live"; generalises across all three verticals, not just meetings.
+- cue.coach — bridges the cue metaphor with the clarity of .coach.
+- meetings.coach — most direct; clear, but leans "meetings" and under-sells interview/customer-service.
+- realtime.coach / inthemoment.ai — name the "during the call" differentiator directly.
+- meeting.coach (singular) / meetingcoach.ai — descriptive fallbacks.
+Trade-off: List B names are instantly clear and cheap to own on newer TLDs, but descriptive and weaker as a defensible trademark; List A names are distinctive and ownable but need clearance. live.coach or cue.coach generalise better than meetings.coach.
+
+Operator to pick direction (distinctive brand vs descriptive domain). Claude can run any shortlist through the same live domain/collision screening on request.
