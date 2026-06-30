@@ -541,3 +541,19 @@ List B — simpler, direct, domain-led (the meetings.guru / meetings.coach style
 Trade-off: List B names are instantly clear and cheap to own on newer TLDs, but descriptive and weaker as a defensible trademark; List A names are distinctive and ownable but need clearance. live.coach or cue.coach generalise better than meetings.coach.
 
 Operator to pick direction (distinctive brand vs descriptive domain). Claude can run any shortlist through the same live domain/collision screening on request.
+
+### oc2 audio + transcript persistence — status + build plan (scoped 30 Jun)
+Verified in code:
+- Transcript persistence EXISTS: meetings + transcript segments persist via the meetings / segments / transcript API routes and the DB layer; the worker streams segments to browsers in real time.
+- Audio persistence does NOT exist, by design: worker/src/session-do.js explicitly never logs or persists audio bytes. It transcribes each complete binary frame (byte0 = speaker, 0 = me / 1 = others) and discards it.
+- Live broadcast fix already in place (state.getWebSockets() used throughout) — that earlier item is done.
+Gap for the Fireflies accuracy benchmark: durable storage of the raw captured audio (ME + OTHERS), keyed to the meeting, with a retrieval/download path, so our transcription can be compared against the same audio run through Fireflies.
+
+Build plan (focused next pass; privacy-sensitive, touches the live worker; verify before claiming complete; cannot ship partially because storage must land with its consent gate):
+1. Storage: add a Cloudflare R2 bucket + wrangler.toml binding (e.g. AUDIO_BUCKET). Additive; default off.
+2. Worker: in session-do.js, only when an opt-in "retain audio" flag is set for the session, append each complete binary frame to per-session, per-speaker R2 objects. Preserve the current no-persist default when the flag is off.
+3. Consent + retention: gate audio retention behind explicit per-session consent (extend the existing compliance acknowledgement) and wire stored audio into app/lib/retention.js so it honours the purge policy. Audio retention OFF by default.
+4. Retrieval: meeting-scoped API (app/api/meetings/[id]/audio) returning signed, time-limited download URLs for the ME and OTHERS tracks, access-controlled to the meeting owner.
+5. UI: a "recording" section on the meeting detail page (download ME/OTHERS), shown only when audio was retained, clearly labelled.
+6. Benchmark harness: a script that pulls a session's stored audio + its persisted transcript + the same audio's Fireflies transcript and reports a word-level accuracy delta.
+DoD: with retention opted in, a completed session's ME + OTHERS audio and transcript survive reload and are retrievable by the owner; retention-off sessions store no audio (unchanged); benchmark script produces an accuracy delta; verified on a real session.
