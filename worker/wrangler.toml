@@ -50,12 +50,22 @@ APP_BASE_URL = "https://silent-meeting-copilot.vercel.app"
 # live capture path is built and the consent/security gate is cleared.
 BOT_CAPTURE_ENABLED = "false"
 
+# Session audio retention to R2 (additive, OFF by default). Persists per-session
+# captured frames ONLY when this is "true" AND the session opted in (retainAudio
+# in DO storage, set by the consent flow). Default OFF preserves the engine's
+# no-audio-persistence guarantee.
+AUDIO_RETENTION_ENABLED = "false"
+
 # Sarvam Saaras v3 streaming engine (additive, OFF by default). When "true" AND a
 # session selects engine=sarvam, ME/OTHERS PCM frames relay to Sarvam instead of
 # nova-3. nova-3 stays the default engine and the fallback. SARVAM_API_KEY is a secret.
-SARVAM_ENABLED = "false"
+SARVAM_ENABLED = "true"
 SARVAM_MODE = "codemix"
 SARVAM_LANG = "hi-IN"
 SARVAM_CODEC = "pcm_s16le"
-SARVAM_ENCODING = "audio/x-raw"
-SARVAM_DEBUG = "false"
+SARVAM_ENCODING = "audio/wav"
+SARVAM_DEBUG = "true"
+
+# [[r2_buckets]] — re-enable after granting the deploy token Workers R2 Storage permission
+# binding = "SESSION_AUDIO"
+# bucket_name = "smc-session-audio"

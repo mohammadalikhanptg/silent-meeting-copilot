@@ -13,6 +13,13 @@ function sarvamDebug(env) {
   return v === 'true' || v === '1';
 }
 
+// Audio retention flag. Additive: anything other than an explicit truthy value
+// leaves audio non-persistent (the engine's default guarantee).
+function audioRetentionEnabled(env) {
+  const v = String((env && env.AUDIO_RETENTION_ENABLED) ?? '').toLowerCase();
+  return v === 'true' || v === '1';
+}
+
 // Durable Object: one instance per session, manages WebSocket connections
 // and accumulates audio chunks before sending to the STT provider.
 export class SessionDO {
@@ -348,10 +355,17 @@ export class SessionDO {
       }
 
       const audio = bytes.slice(1);
-      const sess = await this.state.storage.get(['mode','lang','engine']);
+      const sess = await this.state.storage.get(['mode','lang','engine','retainAudio']);
       const useMode = sess.get('mode') || mode || 'auto';
       const useLang = sess.has('lang') ? sess.get('lang') : (lang ?? null);
       const useEngine = sess.get('engine') || att.engine || 'nova3';
+
+      // Optional opt-in audio retention to R2 (additive; default OFF). Stores the
+      // complete captured frame for later benchmark/replay. Runs only when the server
+      // flag is on AND this session opted in; preserves the no-persist default.
+      if (audioRetentionEnabled(this.env) && this.env.SESSION_AUDIO && sess.get('retainAudio')) {
+        try { await this._retainAudioFrame(speaker, audio, useEngine); } catch (_) {}
+      }
 
       // Sarvam streaming path (additive, flag-gated). When selected, the binary
       // payload is raw 16kHz Int16LE PCM (not a WebM file) and is relayed frame
@@ -393,6 +407,20 @@ export class SessionDO {
       console.error('DO audio error:', err);
       this._broadcast({ type: 'error', message: 'processing error' });
     }
+  }
+
+  async _retainAudioFrame(speaker, audio, engine) {
+    const bucket = this.env.SESSION_AUDIO;
+    if (!bucket) return;
+    const sid = this.state.id.toString();
+    const isPcm = engine === 'sarvam';
+    const ext = isPcm ? 'pcm' : 'webm';
+    const seq = (this._audioSeq = (this._audioSeq || 0) + 1);
+    const key = `sessions/${sid}/${speaker}/${Date.now()}-${String(seq).padStart(6, '0')}.${ext}`;
+    await bucket.put(key, audio, {
+      httpMetadata: { contentType: isPcm ? 'audio/L16' : 'audio/webm' },
+      customMetadata: { sid, speaker, engine: String(engine), seq: String(seq) },
+    });
   }
 
   async webSocketClose(ws) {
