@@ -557,3 +557,21 @@ Build plan (focused next pass; privacy-sensitive, touches the live worker; verif
 5. UI: a "recording" section on the meeting detail page (download ME/OTHERS), shown only when audio was retained, clearly labelled.
 6. Benchmark harness: a script that pulls a session's stored audio + its persisted transcript + the same audio's Fireflies transcript and reports a word-level accuracy delta.
 DoD: with retention opted in, a completed session's ME + OTHERS audio and transcript survive reload and are retrievable by the owner; retention-off sessions store no audio (unchanged); benchmark script produces an accuracy delta; verified on a real session.
+
+## Status update — 1 Jul 2026 (audio retention substrate + code-signing)
+
+### Done, committed and deployed
+- Privacy-gated R2 session-audio retention built into the engine, DORMANT by default (commit da52e6c, worker version 7f232274). New worker var AUDIO_RETENTION_ENABLED (default "false"); session-do.js gains audioRetentionEnabled(), a per-session retainAudio opt-in read from DO storage, and _retainAudioFrame() which writes each complete captured frame to the SESSION_AUDIO R2 bucket at sessions/<doId>/<speaker>/<ts>-<seq>.<webm|pcm>. Triple-gated (server flag + per-session opt-in + binding present) so the no-persist default is fully preserved.
+- R2 bucket smc-session-audio created (Cloudflare, Western Europe, public access disabled).
+- Azure Trusted Signing set up for the installer: account pacificinfotech-signing (Basic, West Europe) under Pacific Infotech (UK) Ltd; cert profile pacificinfotech-public-trust (Public Trust) is ACTIVE on a clean PACIFIC INFOTECH (UK) LTD identity validation.
+- Mac executor hardened after a power-loss reboot: pmset acwake 1 and autorestart 1.
+
+### Blocked / not yet active
+- The R2 binding ([[r2_buckets]] SESSION_AUDIO -> smc-session-audio) is COMMENTED OUT in worker/wrangler.toml because the Cloudflare deploy token lacks Workers R2 Storage. wrangler 403s on the bucket check until the deploy token (token_id 653a090b227b3e6b2e117e50ade8bbaf) is granted Workers R2 Storage:Edit. Then: uncomment the block, redeploy, verify the SESSION_AUDIO binding, commit.
+
+### Next
+- Audio retention remaining (t-smc-audio-retention-r2): enable binding after the token fix, then per-session consent flow (sets retainAudio, mode-specific compliance ack), session-scoped retrieval API with signed URLs, recording UI on the meeting detail page, and the Fireflies accuracy benchmark.
+- Commercial design v2 LIVE (t-smc-commercial-design-v2-live): Mo approved going live; single merged cockpit + base Meeting Coach + stackable add-ons; one billable metric = processed meeting minutes; V1 = Meeting Coach + Interviewer Assistant; preserve all existing functionality.
+- Installer signing wiring (t-smc-installer-code-signing): Trusted Signing GitHub Action + federated credential + .NET 8; assign the Trusted Signing Certificate Profile Signer role to the build identity.
+
+Handoff: wfHandoff h-smc-audio-retention-20260701-h1 (topic "SMC audio retention and signing").
