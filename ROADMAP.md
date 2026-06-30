@@ -482,3 +482,39 @@ NEXT ACTIONS (resume point):
 2. Codex design v2 review (anti-drift) of the commercial spec, then present the reconciled v2 before building on live.
 3. Code signing: drive Azure Trusted Signing portal setup (account, certificate profile, CI credential). Business identity validation is the operator's part; confirm org-age eligibility for public cert profiles.
 4. In-product audio/transcript persistence (oc2) — greenlit; pre-req for the Fireflies benchmark and for orchestration.
+
+## Cross-review reconciliation — 30 Jun 2026 (commercial design v2 + naming)
+
+Both Codex reviews returned APPROVE-WITH-CHANGES. Anti-drift check: neither redirected the agreed direction; both sharpened within it (no PROPOSED CHANGE OF DIRECTION). The reconciled decisions below are now the working spec for the commercial build.
+
+### Commercial architecture (design review) — ADOPTED
+- Confirmed: single merged cockpit + base + stackable add-ons. Kept.
+- Usage metric LOCKED to ONE auditable metric: billable processed meeting minutes (rounded to a published increment). Exclude failed joins, suspended capture, and test calls. The "meetings or hours" ambiguity is dropped.
+- Base Meeting Coach must be independently sellable and coherent with zero add-ons. Add-ons unlock vertical modes/settings on top; the base must not become a shell.
+- V1 commercial scope LOCKED: Meeting Coach (base) + Interviewer Assistant (add-on) only. Both largely built. Proves cockpit, metering, compliance-ack, and entitlement model without heavy integration.
+- V1.5: Interviewee Coach (reuses coaching engine on the subscriber's own audio).
+- Later / enterprise track: Customer-Service Assistant (CRM + contact-centre integration). Deferred from first commercial release; it changes the buyer to ops/IT/security and carries the largest integration + security surface.
+- Entitlement system: build to support add-ons, but LAUNCH selling base + one add-on. Keep entitlements simple: one base plan + usage allowance + per-add-on flags + server-side gates. Do NOT enforce the 3-month minimum term via complex runtime state; make it billing-policy/contractual. Avoid multiple simultaneous add-on trials.
+- Bot speaker-names: a product dependency, not a UI detail. Define fallback states (known name / inferred label / unknown participant / OTHERS). Redesign degrades gracefully to OTHERS until the self-hosted bot delivers reliable per-speaker labels. No hard dependency on real names for first release.
+- Language selection stays a base-cockpit capability (core differentiator), consistent across all modes.
+- Defer for first release: customer-service add-on + live CRM/contact-centre APIs; full meeting-bot production rollout unless already reliable; mandatory real-name speaker labels; complex multi-add-on trials; app-enforced minimum-term; enterprise procurement/SSO/custom retention beyond basic readiness.
+
+### Interviewee-side coaching — ethics boundary LOCKED (before any build or sell)
+- Position as "communication coach for your own interview performance," NOT an answer engine.
+- Allowed: structure, clarity, pacing, confidence, reminders from the candidate's OWN materials (CV, notes, portfolio) + the job description, missed-point prompts.
+- Disallowed: fabricating experience, generating deceptive factual claims, solving live technical tests, impersonating competence, bypassing interviewer rules. Add refusal/warning behaviour for these.
+- Default retrieval sources restricted to candidate-provided material + the job description.
+- Mode-specific compliance acknowledgement before use; visible policy boundary in onboarding + terms.
+- Do not launch interviewee as the first vertical.
+
+### Naming (naming review) — DECISION PARKED FOR MO
+- Codex knocked down "Aside" (semantically strong but aside.ai/.com both unavailable + ASIDE is an AI-research acronym) and the generic cluster (Cue/Vantage/Parley/Earshot have direct or adjacent AI-product collisions).
+- Codex single recommendation: Backcue (backcue.ai AND backcue.com both available; on-concept "offstage cue"; works across meeting, interview either-side, and customer-service).
+- Runner-up: Sotto (most premium, matches the operator's instinct; but sotto.ai/.com unavailable, so needs a modified domain + counsel).
+- Other options available on .ai: Sidevoice, Hushline, Veilwise, SottoVoice.
+- Sotto vs Soto: Sotto is the safer spelling. Soto collides with Juan Soto (MLB) + Soto Zen + common surname and loses the "quiet voice" meaning.
+- ALL names need formal USPTO/WIPO/common-law clearance before launch; this is screening, not legal clearance.
+- ACTION: operator to pick. Build proceeds under the current internal name; customer-facing labels swap once chosen (design-review nit: normalise naming before pricing/UI pages are written).
+
+### Next build milestone (teed up)
+In-product audio + transcript persistence (oc2): foundational, independent of the chosen name and the commercial UI. Persist per-session captured audio (ME + OTHERS) and the final transcript durably, with a retrieval path in the web app. Pre-req for the Fireflies accuracy benchmark and for post-meeting minutes/orchestration. Definition of done: a completed session's audio + transcript survive reload and are retrievable; replay/re-scan verified.
