@@ -4,6 +4,7 @@ import { getSql } from '../../lib/db';
 import MinutesPanel from './MinutesPanel';
 import ActionPointsPanel from './ActionPointsPanel';
 import InterviewAssessmentPanel from './InterviewAssessmentPanel';
+import RecordingPanel from './RecordingPanel';
 import ThemeToggle from '../../components/ThemeToggle';
 
 export const dynamic = 'force-dynamic';
@@ -277,6 +278,9 @@ export default async function MeetingDetailPage({ params }) {
           </div>
         </div>
       )}
+
+      {/* Session recording — shown only when audio was retained; fetched client-side */}
+      <RecordingPanel meetingId={id} />
 
       {/* Transcript */}
       <div style={styles.transcriptSection}>

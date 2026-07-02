@@ -14,6 +14,8 @@
     "test:security": "node scripts/test-retention.mjs && node scripts/test-idor.mjs && node scripts/test-engine-ratelimit.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1078.0",
+    "@aws-sdk/s3-request-presigner": "^3.1078.0",
     "@neondatabase/serverless": "latest",
     "docx": "latest",
     "next": "latest",

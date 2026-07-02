@@ -591,3 +591,27 @@ Handoff: wfHandoff h-smc-audio-retention-20260701-h1 (topic "SMC audio retention
 - REQUIRED change: namespace retained audio by meeting id (recommend key meetings/<meetingId>/<speaker>/<ts>-<seq>.<ext>) so the web app (owns meetings, knows meetingId directly) can retrieve without the opaque userDoId. DO must learn active meetingId via the capture-start/control path; _retainAudioFrame uses it. No migration cost (dormant, zero objects).
 - Retrieval: R2 S3 presign viable (R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_ENDPOINT in Mac env). MUST presign against bucket smc-session-audio (R2_BUCKET env = pacific-backups, do NOT use). Owner check via meetings.user_email.
 - Remaining sub-steps (t-smc-audio-retention-r2): (1) worker meeting-id keying + DO meetingId plumbing; (2) per-session consent flow setting retainAudio + mode compliance ack, wired to app/lib/retention.js purge; (3) retrieval API app/api/meetings/[id]/audio (presigned ME/OTHERS, owner-checked); (4) recording UI on meeting detail page, shown only when retained; (5) Fireflies accuracy benchmark harness. Dispatched to Mac executor 2 Jul.
+
+## Status update — 2 Jul 2026 (audio retention: meeting-id keying, consent, retrieval, UI, benchmark — task t-smc-audio-retention-webapp-20260702)
+
+### Done, committed and deployed (engine version 59004a2c, app push pending Vercel)
+All remaining oc2 audio-retention sub-steps complete. AUDIO_RETENTION_ENABLED stays "false"; the feature is inert until the operator flips the flag. All changes are additive; the no-persist default is fully preserved.
+
+1. **Worker — meeting-id keying + DO meetingId plumbing.** `_loadState()` now loads `meetingId` and `retainAudio`. The `control:start/resume` handler stores both from the cockpit message. `_retainAudioFrame` re-keyed to `meetings/<meetingId>/<speaker>/<ts>-<seq>.<ext>`; fails closed (skips) if no meetingId known. `_sendCaptureStart` relays meetingId to helpers. Engine version 59004a2c-e0d8-41af-829e-92c1aa394156.
+
+2. **Per-session consent flow.** Extracted `ComplianceModal` client component in `app/session/page.js`. Modal adds an optional audio-retention checkbox, mode-specific wording (Meeting/Interview/Customer service). `acceptComplianceAndStart(retainAudio)` receives the opt-in. `control:start` message now carries `meetingId` and `retainAudio`. `retainAudioRef` and `retainAudioOpt` state track the opt-in across renders.
+
+3. **Retention wire-up.** `app/lib/r2.js` added (R2 S3 client, `getMeetingAudioUrls`, `deleteMeetingAudio`). `hardDeleteSession` in `app/lib/retention.js` calls `deleteMeetingAudio` after DB rows are purged. `RETENTION_CLASSES` updated to document the R2 audio class. Packages `@aws-sdk/client-s3` and `@aws-sdk/s3-request-presigner` added.
+
+4. **Retrieval API.** New route `app/api/meetings/[id]/audio/route.js` — GET, ownership-checked via `meetings WHERE id AND user_email`, returns `{ ok, me: [...presigned], others: [...presigned], meetingId }`. Returns empty arrays (not error) when no audio retained. 1-hour presigned URL TTL.
+
+5. **Recording UI.** New `RecordingPanel` client component in `app/meetings/[id]/RecordingPanel.js`. Fetches from the retrieval API client-side; renders nothing when empty (no audio retained); shows ME/OTHERS download links labelled and grouped when audio exists. Wired into the meeting detail page above the transcript section.
+
+6. **Benchmark harness.** New `scripts/benchmark-audio-accuracy.mjs`. Takes `MEETING_ID` env var; lists R2 audio for the meeting; presigns and uploads to Fireflies GraphQL (`uploadAudio` mutation); polls until `ready`; computes WER (SMC hypothesis vs Fireflies reference); prints per-speaker accuracy delta. Supports `--speaker me|others|both` and `--json`. Requires `FIREFLIES_API_KEY` in env.
+
+### Deviations from spec
+- None. All acceptance criteria implemented. AUDIO_RETENTION_ENABLED unchanged ("false").
+
+### Pending operator action
+- Set `FIREFLIES_API_KEY` in env to run the benchmark against a real retained session.
+- When ready to enable retention: set `AUDIO_RETENTION_ENABLED = "true"` in wrangler.toml and redeploy the worker. No code change required.

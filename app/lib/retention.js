@@ -10,16 +10,19 @@
 // Section-8 medium "define and enforce a retention and hard-delete policy".
 //
 // Design notes:
-//  - No audio is ever persisted. Captured WebM segments are transcribed in
-//    memory by the engine and discarded; there is no audio table or file
-//    artifact, so a session hard-delete only has to clear text rows. This is
-//    asserted by grep in CI and documented in docs/retention-policy.md.
+//  - Audio is persisted only when AUDIO_RETENTION_ENABLED is true AND the user
+//    explicitly opted in (retainAudio) for a session. When retained, frames are
+//    stored in R2 bucket smc-session-audio under meetings/<meetingId>/. The
+//    hardDeleteSession function also deletes R2 audio for the session so the
+//    purge is complete across both Neon and R2.
 //  - A "session" is a row in `meetings`. Its child data lives in
 //    `transcript_segments`, `flagged_items` (derived coaching artifacts) and
 //    `session_reference_docs`. flagged_items.source_segment references
 //    transcript_segments(id), so flagged_items MUST be deleted before
 //    transcript_segments. session_reference_docs is ON DELETE CASCADE but we
 //    delete it explicitly so the delete is provable without relying on the FK.
+
+import { deleteMeetingAudio } from './r2.js';
 
 // ── Retention windows ─────────────────────────────────────────────────────────
 // Days. Env-overridable so the operator can tighten without a code change.
@@ -57,7 +60,7 @@ export const RETENTION_CLASSES = [
   { data: 'Transcript segments', store: 'Neon: transcript_segments', window: 'lifecycle of parent session', purge: 'deleted with the session' },
   { data: 'Derived coaching artifacts (flags, assist text, references)', store: 'Neon: flagged_items', window: 'lifecycle of parent session', purge: 'deleted with the session' },
   { data: 'Session reference docs (CVs etc.)', store: 'Neon: session_reference_docs', window: 'lifecycle of parent session', purge: 'deleted with the session (also FK ON DELETE CASCADE)' },
-  { data: 'Temporary audio chunks', store: 'none — transcribed in memory, never persisted', window: 'discarded immediately after transcription', purge: 'n/a (nothing to delete)' },
+  { data: 'Session audio (opt-in only)', store: 'Cloudflare R2: smc-session-audio, key meetings/<meetingId>/', window: 'lifecycle of parent session (deleted with session)', purge: 'deleteMeetingAudio in hardDeleteSession; also auto-purge via purgeExpiredSessions' },
   { data: 'Server logs', store: 'Vercel / Cloudflare platform logs only', window: 'platform default; no app-level content logging', purge: 'platform-managed' },
   { data: 'Magic links', store: 'Neon: magic_links', window: `${RETENTION.magicLinkDays}d`, purge: 'purgeAuthHousekeeping' },
   { data: 'Auth attempts', store: 'Neon: auth_attempts', window: `${RETENTION.authAttemptDays}d`, purge: 'purgeAuthHousekeeping' },
@@ -130,6 +133,9 @@ export async function hardDeleteSession(sql, { meetingId, ownerEmail }) {
   // Re-scope the final delete by owner so it stays IDOR-safe even in isolation.
   const mt = await sql`DELETE FROM meetings WHERE id = ${meetingId} AND user_email = ${ownerEmail} RETURNING id`;
   deleted.meetings = mt.length;
+
+  // Delete R2 audio objects for this session (no-op when no audio was retained).
+  try { await deleteMeetingAudio(meetingId); } catch (_) {}
 
   const remaining = await verifySessionPurged(sql, meetingId);
   return { ok: true, deleted, remaining };

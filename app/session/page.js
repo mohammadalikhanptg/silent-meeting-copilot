@@ -69,6 +69,45 @@ function encodeChunk(speaker, audioBuffer) {
   return out.buffer;
 }
 
+// Compliance + per-session audio retention consent modal.
+// `onAccept(retainAudio: bool)` — caller receives the audio-retention opt-in choice.
+function ComplianceModal({ modeType, onCancel, onAccept }) {
+  const [retainAudio, setRetainAudio] = useState(false);
+  const isInterview = modeType === 'interview';
+  const isCx = modeType === 'customer_service';
+
+  const audioConsentLabel = isInterview
+    ? 'Also retain audio for this session — lets me compare our transcription against Fireflies for accuracy. The candidate\'s voice is captured; ensure you have consent.'
+    : isCx
+    ? 'Also retain audio for this session — lets me compare our transcription against Fireflies for accuracy. The customer\'s voice is captured; ensure you have consent.'
+    : 'Also retain audio for this session — lets me compare our transcription against Fireflies for accuracy. Other participants\' voices are captured; ensure you have consent.';
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={onCancel}>
+      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: '28px 32px', maxWidth: 480, width: '90vw', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>Before you start</div>
+        <div style={{ fontSize: 14, color: 'var(--tx-2)', lineHeight: 1.6, marginBottom: 20 }}>
+          This meeting may be transcribed and analysed by AI to provide live assistance, quality and assessment.
+          Make sure you have any consent required, and that recording or analysing this conversation complies with the laws that apply to you and the other participants. You are responsible for lawful use.
+        </div>
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', marginBottom: 24, fontSize: 13, color: 'var(--tx-2)', lineHeight: 1.5 }}>
+          <input
+            type="checkbox"
+            checked={retainAudio}
+            onChange={(e) => setRetainAudio(e.target.checked)}
+            style={{ marginTop: 2, flexShrink: 0, accentColor: '#2AB49F' }}
+          />
+          <span>{audioConsentLabel}</span>
+        </label>
+        <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+          <button onClick={onCancel} style={{ padding: '8px 18px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-raised)', color: 'var(--tx)', cursor: 'pointer', fontSize: 14 }}>Cancel</button>
+          <button onClick={() => onAccept(retainAudio)} style={{ padding: '8px 18px', borderRadius: 6, border: 'none', background: '#2AB49F', color: '#fff', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>I understand — start</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function SessionPage() {
   const [sessionCode, setSessionCode] = useState('');
   const [meetingId, setMeetingId] = useState(null); // set from ?m= param or on create
@@ -97,6 +136,8 @@ export default function SessionPage() {
   const [helperConnected, setHelperConnected] = useState(null);
   const [paused, setPaused] = useState(false);
   const [showComplianceModal, setShowComplianceModal] = useState(false);
+  const [retainAudioOpt, setRetainAudioOpt] = useState(false); // per-session audio retention opt-in (default OFF)
+  const retainAudioRef = useRef(false);
   const [prepCollapsed, setPrepCollapsed] = useState(false);
 
   // Cockpit layout: vertical panel order + opt-in drag-to-reorder ("Arrange") mode.
@@ -144,6 +185,7 @@ export default function SessionPage() {
   useEffect(() => { refDocsRef.current = refDocs; }, [refDocs]);
   useEffect(() => { flaggedItemsRef.current = flaggedItems; }, [flaggedItems]);
   useEffect(() => { meetingIdRef.current = meetingId; }, [meetingId]);
+  useEffect(() => { retainAudioRef.current = retainAudioOpt; }, [retainAudioOpt]);
 
   const meScrollRef = useRef(null);
   const otScrollRef = useRef(null);
@@ -694,7 +736,7 @@ export default function SessionPage() {
           reconnectCount.current = 0;
           setWsConnected(true);
           setError('');
-          try { ws.send(JSON.stringify({ type: 'control', action: resume ? 'resume' : 'start', mode: sessionMode, engine, lang: MODE_LANG[sessionMode] || null })); } catch (_) {}
+          try { ws.send(JSON.stringify({ type: 'control', action: resume ? 'resume' : 'start', mode: sessionMode, engine, lang: MODE_LANG[sessionMode] || null, meetingId: meetingIdRef.current || null, retainAudio: retainAudioRef.current || false })); } catch (_) {}
           startHeartbeat();
 
           ws.onmessage = (evt) => {
@@ -963,8 +1005,10 @@ export default function SessionPage() {
     startSession();
   }, [startSession]);
 
-  const acceptComplianceAndStart = useCallback(() => {
+  const acceptComplianceAndStart = useCallback((retainAudio) => {
     complianceAckRef.current = true;
+    retainAudioRef.current = retainAudio === true;
+    setRetainAudioOpt(retainAudio === true);
     setShowComplianceModal(false);
     startSession();
   }, [startSession]);
@@ -1335,19 +1379,11 @@ export default function SessionPage() {
           </div>
         )}
         {showComplianceModal && (
-          <div style={styles.modalOverlay} onClick={() => setShowComplianceModal(false)}>
-            <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
-              <div style={styles.modalTitle}>Before you start</div>
-              <div style={styles.modalBody}>
-                This meeting may be transcribed and analysed by AI to provide live assistance, quality and assessment.
-                Make sure you have any consent required, and that recording or analysing this conversation complies with the laws that apply to you and the other participants. You are responsible for lawful use.
-              </div>
-              <div style={styles.modalActions}>
-                <button onClick={() => setShowComplianceModal(false)} style={{ ...styles.btn, background: 'var(--bg-raised)', color: 'var(--tx)' }}>Cancel</button>
-                <button onClick={acceptComplianceAndStart} style={{ ...styles.btn, background: '#2AB49F' }}>I understand — start</button>
-              </div>
-            </div>
-          </div>
+          <ComplianceModal
+            modeType={modeType}
+            onCancel={() => setShowComplianceModal(false)}
+            onAccept={acceptComplianceAndStart}
+          />
         )}
 
         {/* Cockpit panels — vertical drag-to-reorder via opt-in Arrange mode */}

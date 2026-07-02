@@ -116,7 +116,7 @@ export class SessionDO {
   }
 
   async _loadState() {
-    const m = await this.state.storage.get(['managed','capturing','status','mode','lang','engine','epoch','activeHelperId','captureStartedAt','graceUntil']);
+    const m = await this.state.storage.get(['managed','capturing','status','mode','lang','engine','epoch','activeHelperId','captureStartedAt','graceUntil','meetingId','retainAudio']);
     return {
       managed: m.get('managed') === true,
       capturing: m.get('capturing') === true,
@@ -128,6 +128,8 @@ export class SessionDO {
       activeHelperId: m.get('activeHelperId') || null,
       captureStartedAt: m.get('captureStartedAt') || 0,
       graceUntil: m.get('graceUntil') || null,
+      meetingId: m.get('meetingId') || null,
+      retainAudio: m.get('retainAudio') === true,
     };
   }
 
@@ -176,7 +178,7 @@ export class SessionDO {
   }
 
   _sendCaptureStart(ws, st) {
-    try { ws.send(JSON.stringify({ type: 'capture', action: 'start', mode: st.mode || 'auto', engine: st.engine || 'nova3', lang: st.lang ?? null })); } catch (_) {}
+    try { ws.send(JSON.stringify({ type: 'capture', action: 'start', mode: st.mode || 'auto', engine: st.engine || 'nova3', lang: st.lang ?? null, meetingId: st.meetingId || null })); } catch (_) {}
   }
 
   // Elect `server` (cid) as the single active helper; demote any others.
@@ -282,6 +284,11 @@ export class SessionDO {
             if (ctrl.mode !== undefined) patch.mode = ctrl.mode || 'auto';
             if (ctrl.lang !== undefined) patch.lang = ctrl.lang || null;
             if (ctrl.engine !== undefined) patch.engine = ctrl.engine || 'nova3';
+            // Store meeting id and per-session audio retention opt-in from the cockpit.
+            // meetingId is required for meeting-scoped R2 key scheme; retainAudio defaults
+            // false (no-persist) and is only true when the user explicitly opted in.
+            if (ctrl.meetingId) patch.meetingId = ctrl.meetingId;
+            if (typeof ctrl.retainAudio === 'boolean') patch.retainAudio = ctrl.retainAudio;
             await this.state.storage.put(patch);
             let st = await this._loadState();
             const helpers = this._helpers();
@@ -355,16 +362,17 @@ export class SessionDO {
       }
 
       const audio = bytes.slice(1);
-      const sess = await this.state.storage.get(['mode','lang','engine','retainAudio']);
+      const sess = await this.state.storage.get(['mode','lang','engine','retainAudio','meetingId']);
       const useMode = sess.get('mode') || mode || 'auto';
       const useLang = sess.has('lang') ? sess.get('lang') : (lang ?? null);
       const useEngine = sess.get('engine') || att.engine || 'nova3';
+      const useMeetingId = sess.get('meetingId') || null;
 
       // Optional opt-in audio retention to R2 (additive; default OFF). Stores the
       // complete captured frame for later benchmark/replay. Runs only when the server
-      // flag is on AND this session opted in; preserves the no-persist default.
-      if (audioRetentionEnabled(this.env) && this.env.SESSION_AUDIO && sess.get('retainAudio')) {
-        try { await this._retainAudioFrame(speaker, audio, useEngine); } catch (_) {}
+      // flag is on AND this session opted in AND a meetingId was supplied (fail closed).
+      if (audioRetentionEnabled(this.env) && this.env.SESSION_AUDIO && sess.get('retainAudio') && useMeetingId) {
+        try { await this._retainAudioFrame(speaker, audio, useEngine, useMeetingId); } catch (_) {}
       }
 
       // Sarvam streaming path (additive, flag-gated). When selected, the binary
@@ -409,17 +417,19 @@ export class SessionDO {
     }
   }
 
-  async _retainAudioFrame(speaker, audio, engine) {
+  async _retainAudioFrame(speaker, audio, engine, meetingId) {
     const bucket = this.env.SESSION_AUDIO;
     if (!bucket) return;
-    const sid = this.state.id.toString();
+    // Fail closed: without a meetingId the web app cannot retrieve this audio.
+    // The DO only receives a meetingId from the cockpit's capture-start message.
+    if (!meetingId) return;
     const isPcm = engine === 'sarvam';
     const ext = isPcm ? 'pcm' : 'webm';
     const seq = (this._audioSeq = (this._audioSeq || 0) + 1);
-    const key = `sessions/${sid}/${speaker}/${Date.now()}-${String(seq).padStart(6, '0')}.${ext}`;
+    const key = `meetings/${meetingId}/${speaker}/${Date.now()}-${String(seq).padStart(6, '0')}.${ext}`;
     await bucket.put(key, audio, {
       httpMetadata: { contentType: isPcm ? 'audio/L16' : 'audio/webm' },
-      customMetadata: { sid, speaker, engine: String(engine), seq: String(seq) },
+      customMetadata: { meetingId, speaker, engine: String(engine), seq: String(seq) },
     });
   }
 
