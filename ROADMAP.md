@@ -575,3 +575,19 @@ DoD: with retention opted in, a completed session's ME + OTHERS audio and transc
 - Installer signing wiring (t-smc-installer-code-signing): Trusted Signing GitHub Action + federated credential + .NET 8; assign the Trusted Signing Certificate Profile Signer role to the build identity.
 
 Handoff: wfHandoff h-smc-audio-retention-20260701-h1 (topic "SMC audio retention and signing").
+
+## Status update — 2 Jul 2026 (R2 binding live; SMC Cloudflare token provisioned)
+
+### Done, committed and deployed
+- Audio-retention R2 blocker CLEARED. Operator rolled the Silent Meeting Copilot Cloudflare token; new token id df39b412f9ca65b7ce0037e538cc5869 (Workers R2 Storage:Edit + Workers Scripts:Edit + Workers AI + AI Gateway + Account Settings:Read; account 6b8a541251738b917ee0289afb8eadce). SESSION_AUDIO -> smc-session-audio binding deployed live (smc-engine worker version 25f0b6b1-135b-4d3a-bcdb-984df1d10021). AUDIO_RETENTION_ENABLED stays "false": retention remains dormant, triple-gated. Root cause of the multi-day block: two unrelated tokens (Mail Connector 663a140d, PTHM-DNS 653a090b) were wired in; the real SMC token had never been embedded (Last used "-").
+
+### SMC Cloudflare token access convention (every SMC chat MUST follow)
+- SMC-exclusive token lives ONLY on the Mac at ~/.pacific/smc/cloudflare.env (exports CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID). For any SMC Cloudflare / R2 / smc-engine deploy: run `set -a; source ~/.pacific/env; source ~/.pacific/smc/cloudflare.env; set +a` (SMC file AFTER the global env so it overrides).
+- Do NOT use the global CLOUDFLARE_API_TOKEN in ~/.pacific/env — that is the Mail Connector token (663a140d) with no R2.
+- Drift check: correct token id is df39b412f9ca65b7ce0037e538cc5869. If `wrangler r2 bucket list` 403s, the env has drifted to the wrong token.
+
+### Next-build design findings (audio retention remaining — verified in code 2 Jul)
+- Session Durable Object is addressed PER USER (idFromName('u:'+email)); it stores NO meeting id. Retained audio is keyed sessions/<userDoId>/<speaker>/<ts>-<seq>, with no meeting association, so meeting-scoped retrieval is impossible with the deployed key scheme.
+- REQUIRED change: namespace retained audio by meeting id (recommend key meetings/<meetingId>/<speaker>/<ts>-<seq>.<ext>) so the web app (owns meetings, knows meetingId directly) can retrieve without the opaque userDoId. DO must learn active meetingId via the capture-start/control path; _retainAudioFrame uses it. No migration cost (dormant, zero objects).
+- Retrieval: R2 S3 presign viable (R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_ENDPOINT in Mac env). MUST presign against bucket smc-session-audio (R2_BUCKET env = pacific-backups, do NOT use). Owner check via meetings.user_email.
+- Remaining sub-steps (t-smc-audio-retention-r2): (1) worker meeting-id keying + DO meetingId plumbing; (2) per-session consent flow setting retainAudio + mode compliance ack, wired to app/lib/retention.js purge; (3) retrieval API app/api/meetings/[id]/audio (presigned ME/OTHERS, owner-checked); (4) recording UI on meeting detail page, shown only when retained; (5) Fireflies accuracy benchmark harness. Dispatched to Mac executor 2 Jul.
