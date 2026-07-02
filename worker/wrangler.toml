@@ -66,6 +66,6 @@ SARVAM_CODEC = "pcm_s16le"
 SARVAM_ENCODING = "audio/wav"
 SARVAM_DEBUG = "true"
 
-# [[r2_buckets]] — re-enable after granting the deploy token Workers R2 Storage permission
-# binding = "SESSION_AUDIO"
-# bucket_name = "smc-session-audio"
+[[r2_buckets]]
+binding = "SESSION_AUDIO"
+bucket_name = "smc-session-audio"
