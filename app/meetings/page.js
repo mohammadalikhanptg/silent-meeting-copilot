@@ -3,6 +3,7 @@ import { getSessionPayload } from '../lib/auth';
 import { getSql } from '../lib/db';
 import NewSessionButton from './NewSessionButton';
 import ThemeToggle from '../components/ThemeToggle';
+import AppShell from '../components/AppShell';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,6 +49,7 @@ export default async function SessionsPage() {
   `;
 
   return (
+    <AppShell>
     <main className="sessions-root">
       {/* Header */}
       <div className="sessions-header">
@@ -121,5 +123,6 @@ export default async function SessionsPage() {
         </div>
       )}
     </main>
+    </AppShell>
   );
 }

@@ -6,6 +6,7 @@ import ActionPointsPanel from './ActionPointsPanel';
 import InterviewAssessmentPanel from './InterviewAssessmentPanel';
 import RecordingPanel from './RecordingPanel';
 import ThemeToggle from '../../components/ThemeToggle';
+import AppShell from '../../components/AppShell';
 
 export const dynamic = 'force-dynamic';
 
@@ -83,6 +84,7 @@ export default async function MeetingDetailPage({ params }) {
   const clarifiedCount = segments.filter(s => s.clarified_by_me).length;
 
   return (
+    <AppShell>
     <main style={styles.root}>
       {/* Header */}
       <div style={styles.header}>
@@ -334,6 +336,7 @@ export default async function MeetingDetailPage({ params }) {
         )}
       </div>
     </main>
+    </AppShell>
   );
 }
 

@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import ThemeToggle from '../components/ThemeToggle';
+import AppShell from '../components/AppShell';
 
 const ENGINE_URL = process.env.NEXT_PUBLIC_ENGINE_URL || 'https://smc-engine.ali-6b8.workers.dev';
 const CHUNK_MS = 2500;
@@ -1130,6 +1131,7 @@ export default function SessionPage() {
   }, [editLayout, visiblePanels.length]);
 
   return (
+    <AppShell>
     <>
       <div style={styles.root}>
 
@@ -1802,6 +1804,7 @@ export default function SessionPage() {
         </div>
       </div>
     </>
+    </AppShell>
   );
 }
 

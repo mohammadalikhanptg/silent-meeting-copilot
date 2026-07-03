@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo } from 'react';
 import ThemeToggle from '../components/ThemeToggle';
+import AppShell from '../components/AppShell';
 
 function buildGuidePrompt(known = {}) {
   const { businesses = [], bio = '', emails = [], socialLinks = [], commonItems = [] } = known;
@@ -279,6 +280,7 @@ export default function ProfilePage() {
   }
 
   return (
+    <AppShell>
     <>
       <style>{`
         @media (max-width: 600px) { .pf-row { flex-direction: column !important; } }
@@ -702,6 +704,7 @@ export default function ProfilePage() {
         </div>
       </div>
     </>
+    </AppShell>
   );
 }
 
