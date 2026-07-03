@@ -8,6 +8,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
+  id-token: write
 jobs:
   build:
     strategy:
@@ -19,6 +20,10 @@ jobs:
           - os: macos-latest
             platform: mac
     runs-on: ${{ matrix.os }}
+    env:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
     defaults:
       run:
         working-directory: helper
@@ -31,6 +36,30 @@ jobs:
       - run: npm run dist:${{ matrix.platform }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Setup .NET 8 (Trusted Signing prerequisite)
+        if: matrix.platform == 'win' && env.AZURE_CLIENT_ID != ''
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Azure login (OIDC, no secret)
+        if: matrix.platform == 'win' && env.AZURE_CLIENT_ID != ''
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Sign Windows installer (Azure Trusted Signing)
+        if: matrix.platform == 'win' && env.AZURE_CLIENT_ID != ''
+        uses: azure/trusted-signing-action@v0
+        with:
+          endpoint: https://weu.codesigning.azure.net/
+          trusted-signing-account-name: pacificinfotech-signing
+          certificate-profile-name: pacificinfotech-public-trust
+          files-folder: ${{ github.workspace }}/helper/dist
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
       - uses: actions/upload-artifact@v4
         with:
           name: smc-helper-${{ matrix.platform }}
