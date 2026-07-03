@@ -620,3 +620,50 @@ All remaining oc2 audio-retention sub-steps complete. AUDIO_RETENTION_ENABLED st
 - Signing identity created: Entra app registration smc-signing-github-actions (client id 12749ffe-28e8-490a-93be-cd701904e134), tenant 9c32d8c8-c759-459f-9fb5-a667a4b10135, subscription fb4133ac-0c6b-4369-b5b6-e0ba5248d31f. GitHub OIDC federated credential scoped to repo mohammadalikhanptg/silent-meeting-copilot branch main (subject repo:mohammadalikhanptg/silent-meeting-copilot:ref:refs/heads/main). No client secret. Role "Artifact Signing Certificate Profile Signer" (renamed from "Trusted Signing Certificate Profile Signer") assigned on account pacificinfotech-signing.
 - Signing wired into .github/workflows/smc-helper.yml: Windows leg runs azure/login (OIDC) + azure/trusted-signing-action@v0 against endpoint https://weu.codesigning.azure.net/, account pacificinfotech-signing, profile pacificinfotech-public-trust, signing helper/dist/*.exe before upload/release. Steps guarded by env.AZURE_CLIENT_ID so they are inert (skipped, not failed) until the repo secrets exist. Successor action if deprecated: azure/artifact-signing-action@v2.
 - OUTSTANDING (operator): add repo secrets AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID, then re-run smc-helper via workflow_dispatch to produce the first signed SMC-Helper-Setup.exe; verify the signature on the released installer. Only the NSIS installer .exe is signed; inner app binaries would need an electron-builder afterSign hook (future refinement).
+
+---
+
+## ADDENDUM (3 Jul 2026) — Commercial redesign Phase 1: design system + app shell (COMPLETE)
+
+Task: `t-smc-commercial-v2-phase1-shell-20260703`. Commit: `97c740a`. Run ID: `37AA19B4-1C6A-403E-8FD4-82788F273133`.
+
+### What shipped
+Phase 1 of the SMC commercial redesign: a persistent app shell and design system foundation wrapping all existing authenticated pages, with zero changes to existing page logic.
+
+**Design system additions:**
+- Bricolage Grotesque loaded via `next/font/google` as `--font-display` (display/heading font)
+- Signal gradient token `--signal` (indigo #818cf8 → cyan #22d3ee) added as CSS variable
+- Shell and placeholder CSS section added to `globals.css` (~200 lines)
+
+**AppShell component (`app/components/AppShell.js`):**
+- Persistent 220px sidebar on desktop with SVG nav icons
+- Bottom navigation bar on mobile (≤768px) with 5 primary items
+- Active state detection via `usePathname()` per-route
+- Navigation: Home `/home`, Live `/session`, Insights `/insights`, Library `/meetings`, Settings `/profile`, Billing `/billing`
+- "Soon" badges on Insights and Billing in sidebar
+
+**Brand token (`app/lib/brand.js`):**
+- Single `PRODUCT_NAME` export used everywhere — pending product rename is a one-file change
+
+**New routes:**
+- `/home` — authenticated Home overview (recent sessions, stats, quick-action cards)
+- `/insights` — designed placeholder with coming-feature preview cards
+- `/billing` — designed placeholder with coming-feature preview cards
+- `/` now redirects to `/home` instead of `/meetings`
+
+**Existing pages wrapped (zero logic changes):**
+- `/meetings` — LibraryPage wrapped with AppShell
+- `/session` — SessionCockpit wrapped with AppShell (shell-main is the scroll container)
+- `/profile` — ProfilePage wrapped with AppShell
+- `/meetings/[id]` — MeetingDetailPage wrapped with AppShell
+
+### Verification
+- Build: `next build` clean on Next.js 16.2.9 Turbopack — no errors, only the pre-existing `middleware` deprecation warning
+- All existing routes present in build output
+- Vercel deploy READY: `silent-meeting-copilot-pkoiaf8wz-pacifictechnologygroup.vercel.app`
+
+### What remains (later phases)
+- Phase 2: Live cockpit visual redesign within the new shell (the session/page.js has its own header/brand that is now slightly redundant inside the shell)
+- Phase 2: Usage metering, entitlements, and Billing page implementation
+- Phase 2: Insights analytics layer
+- Phase 3: Pending product rename (single change to `app/lib/brand.js`)
