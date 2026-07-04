@@ -760,3 +760,6 @@ Sequencing. 2b (delete) and the raw-versus-derived separation are the enabling g
 ### Deferred from Phase 2a
 - Screenshot capture via QA browser bridge (not available in this execution environment) — visual verification done via Vercel preview URL
 - Phase 2c (personalisation/learning layer) remains future scope as documented above
+
+### Palette direction locked (4 Jul 2026, operator)
+Dark and light themes must draw from proven corporate palettes, the shades enterprises actually ship (deep slate/ink families for dark, soft neutral canvases with white panels for light), never absolute black or stark white. The shipped Phase 2a palette (dark base #0e1117 with slate elevation steps; light canvas #f1f3f8 with white panels) conforms and is the baseline. All later phases, the Phase 2 cockpit rebuild first among them, inherit this direction.
