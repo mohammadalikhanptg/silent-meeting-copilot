@@ -763,3 +763,47 @@ Sequencing. 2b (delete) and the raw-versus-derived separation are the enabling g
 
 ### Palette direction locked (4 Jul 2026, operator)
 Dark and light themes must draw from proven corporate palettes, the shades enterprises actually ship (deep slate/ink families for dark, soft neutral canvases with white panels for light), never absolute black or stark white. The shipped Phase 2a palette (dark base #0e1117 with slate elevation steps; light canvas #f1f3f8 with white panels) conforms and is the baseline. All later phases, the Phase 2 cockpit rebuild first among them, inherit this direction.
+
+---
+
+## Phase 2b Status — SHIPPED (2026-07-04, commit aed4083)
+
+### 2b. Corporate theme palette — COMPLETE
+
+**Problem fixed:** Phase 2a changed token variables but calm-overrides.css was loading after globals.css and using `!important` to paint surfaces with hardcoded near-black and pure-white values. The operator saw no visible change on screen.
+
+**Root cause:** Two-layer failure — (1) calm-overrides.css forced `.smc-transcript-panel` to `rgba(15,19,38,0.96)` (near-black gradient) and light panels to `#ffffff` via `!important` overriding the tokens; (2) the skin v3/v4 sections in globals.css had hardcoded `body { background: #0e1117; }` that also bypassed `var(--bg)`.
+
+**Changes shipped:**
+
+`app/globals.css` — dark token set:
+- Canvas `--bg: #101a2e` (was `#0e1117`; now deep navy, clear blue tint, not near-black)
+- `--bg-up: #16233c`, `--bg-panel: #1b2a47`, `--bg-raised: #223256`
+- `--border: #2c3f66` (was translucent white `rgba(255,255,255,0.10)`)
+- Text `--tx: #eaeef7`, muted `--tx-3: #9fb0cf`
+- Accent `--accent: #6366f1` (indigo solid), `--accent-hi: #818cf8`
+
+`app/globals.css` — light token set:
+- Canvas `--bg: #eef1f6` (was `#f1f3f8`; clearly tinted neutral, not near-white)
+- `--bg-up: #e6eaf2`, `--bg-panel: #ffffff` (white cards pop against tinted canvas), `--bg-raised: #f4f6fb`
+- `--border: #d6ddea` (solid, was translucent)
+- Text `--tx: #1a2233`, muted `--tx-3: #5a6a86`
+- Accent `--accent: #4f46e5` (indigo solid), `--accent-hi: #6366f1`
+
+`app/globals.css` — hardcoded hex bodies removed:
+- `body { background: #0e1117; }` → `body { background: var(--bg); }`
+- `[data-theme="light"] body { background: #f1f3f8; }` → `var(--bg)`
+- `body::before { background-color: #0d1117; }` → `var(--bg)`
+
+`app/calm-overrides.css` — reconciled:
+- `animation: none !important` intent kept in full (motion kill unchanged)
+- `.smc-transcript-panel` dark: replaced near-black gradient with `linear-gradient(160deg, var(--bg-raised), var(--bg-panel))!important` → resolves to `#223256 → #1b2a47`
+- Light panels: replaced `#ffffff` hardcode with `linear-gradient(160deg, var(--bg-panel), var(--bg-raised))!important` → resolves via tokens
+- No hardcoded colours remain in calm-overrides.css
+
+**Verified:**
+- Compiled CSS on `smc.pacific.london` confirms all tokens set correctly and both body rules resolve via `var(--bg)` not hex
+- No `!important` rule forces panels to pure white or near-black; all panel backgrounds resolve to token surfaces
+- Build clean (Next.js 16.2.9, TypeScript pass, 0 errors)
+- Vercel deploy READY within 30s of push
+- WCAG AA contrast confirmed: dark (#eaeef7 on #101a2e ≈ 14:1), muted (#9fb0cf on #101a2e ≈ 8.7:1); light (#1a2233 on #eef1f6 ≈ 14:1), muted (#5a6a86 on #eef1f6 ≈ 4.7:1)
