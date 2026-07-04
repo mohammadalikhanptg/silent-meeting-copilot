@@ -12,11 +12,11 @@
    DESIGN TOKENS — DARK (default)
    ========================================================== */
 :root {
-  /* Backgrounds */
-  --bg:            #07090f;
-  --bg-up:         #0d1018;
-  --bg-panel:      #111827;
-  --bg-raised:     #1a1f2e;
+  /* Backgrounds — deep slate ink, not jet black; distinct elevation steps */
+  --bg:            #0e1117;
+  --bg-up:         #141a24;
+  --bg-panel:      #1a1f2e;
+  --bg-raised:     #1e2438;
 
   /* Glass surfaces */
   --surf-0:        rgba(255,255,255,0.035);
@@ -26,7 +26,7 @@
 
   /* Borders */
   --border:        rgba(255,255,255,0.10);
-  --border-hi:     rgba(255,255,255,0.22);
+  --border-hi:     rgba(255,255,255,0.30);
   --border-subtle: rgba(255,255,255,0.05);
 
   /* Text */
@@ -34,10 +34,10 @@
   --tx-2:          #c4ccd8;
   --tx-3:          #b3bdcd;
 
-  /* Accent — indigo */
-  --accent:        #818cf8;
-  --accent-hi:     #a5b4fc;
-  --accent-dim:    rgba(129,140,248,0.15);
+  /* Accent — indigo-to-cyan signal */
+  --accent:        #8a93ff;
+  --accent-hi:     #b9c0ff;
+  --accent-dim:    rgba(138,147,255,0.16);
 
   /* Speaker identity — ME=green, OTHERS=sky */
   --me:            #22c55e;
@@ -93,8 +93,8 @@
   --t-slow:   0.35s;
 
   /* Legacy compat vars (used by old inline styles still present) */
-  --bg-compat:    #07090f;
-  --panel-compat: #111827;
+  --bg-compat:    #0e1117;
+  --panel-compat: #1a1f2e;
   --border-compat: rgba(255,255,255,0.10);
   --text-compat:  #e8eaf0;
   --muted-compat: #9ca3af;
@@ -104,27 +104,30 @@
    LIGHT THEME
    ========================================================== */
 [data-theme="light"] {
-  --bg:            #f0f4ff;
-  --bg-up:         #e8edf8;
+  /* Backgrounds — soft neutral off-white, not pure white; distinct elevation steps */
+  --bg:            #f1f3f8;
+  --bg-up:         #e8ebf2;
   --bg-panel:      #ffffff;
-  --bg-raised:     #f5f8ff;
+  --bg-raised:     #eef1f9;
 
-  --surf-0:        rgba(255,255,255,0.50);
-  --surf-1:        rgba(255,255,255,0.72);
-  --surf-2:        rgba(255,255,255,0.86);
-  --surf-3:        rgba(255,255,255,0.95);
+  --surf-0:        rgba(255,255,255,0.55);
+  --surf-1:        rgba(255,255,255,0.76);
+  --surf-2:        rgba(255,255,255,0.90);
+  --surf-3:        rgba(255,255,255,0.97);
 
-  --border:        rgba(0,0,0,0.09);
+  --border:        rgba(120,130,170,0.16);
   --border-hi:     rgba(255,255,255,0.95);
   --border-subtle: rgba(0,0,0,0.04);
 
+  /* Text — WCAG AA on #f1f3f8 base */
   --tx:            #0f1628;
   --tx-2:          #2a3340;
   --tx-3:          #4b5563;
 
-  --accent:        #6366f1;
-  --accent-hi:     #818cf8;
-  --accent-dim:    rgba(99,102,241,0.12);
+  /* Accent — indigo-to-cyan signal */
+  --accent:        #5b6cff;
+  --accent-hi:     #7c5cff;
+  --accent-dim:    rgba(91,108,255,0.12);
 
   --me:            #16a34a;
   --me-bg:         rgba(22,163,74,0.08);
@@ -149,9 +152,9 @@
   --shadow-lg: 0 8px 48px rgba(0,0,0,0.13), 0 2px 10px rgba(0,0,0,0.07);
   --shadow-xl: 0 24px 72px rgba(0,0,0,0.15), 0 6px 20px rgba(0,0,0,0.08);
 
-  --bg-compat:    #f0f4ff;
+  --bg-compat:    #f1f3f8;
   --panel-compat: #ffffff;
-  --border-compat: rgba(0,0,0,0.09);
+  --border-compat: rgba(120,130,170,0.16);
   --text-compat:  #0f1628;
   --muted-compat: #6b7280;
 }
@@ -791,24 +794,14 @@ body {
    backgrounds + surface treatment. Appended last so it wins.
    ========================================================== */
 
-/* ---------- DARK = LIQUID GLASS ---------- */
-:root {
-  --bg:        #080a16;
-  --bg-up:     #0c1022;
-  --bg-panel:  #121732;
-  --bg-raised: #1a2142;
-  --border-hi: rgba(255,255,255,0.30);
-  --accent:    #8a93ff;
-  --accent-hi: #b9c0ff;
-  --accent-dim: rgba(138,147,255,0.16);
-}
+/* ---------- DARK = LIQUID GLASS (tokens consolidated into main :root) ---------- */
 
 @keyframes smc-liquid {
   0%   { background-position: 0% 50%, 100% 50%, 50% 0%, 0% 50%; }
   50%  { background-position: 100% 50%, 0% 50%, 50% 100%, 100% 50%; }
   100% { background-position: 0% 50%, 100% 50%, 50% 0%, 0% 50%; }
 }
-body { background: #080a16; }
+body { background: #0e1117; }
 body::before {
   content: '';
   position: fixed; inset: 0; z-index: -1; pointer-events: none;
@@ -816,7 +809,7 @@ body::before {
     radial-gradient(60% 50% at 18% 22%, rgba(120,110,255,0.22), transparent 70%),
     radial-gradient(55% 55% at 82% 74%, rgba(40,185,225,0.16), transparent 70%),
     radial-gradient(52% 42% at 60% 14%, rgba(175,90,255,0.13), transparent 72%),
-    linear-gradient(125deg, #080a16, #110a28 45%, #06121f);
+    linear-gradient(125deg, #0e1117, #130f2a 45%, #0a1520);
   background-size: 170% 170%, 170% 170%, 170% 170%, 300% 300%;
   animation: smc-liquid 32s ease-in-out infinite;
 }
@@ -829,29 +822,14 @@ body::before {
   box-shadow: var(--shadow-md), inset 0 1px 0 rgba(255,255,255,0.18), inset 0 -18px 34px rgba(120,130,255,0.05);
 }
 
-/* ---------- LIGHT = CLAYMORPHISM ---------- */
-[data-theme="light"] {
-  --bg:        #ecedf5;
-  --bg-up:     #e5e8f2;
-  --bg-panel:  #f6f7fc;
-  --bg-raised: #eef1f9;
-  --surf-0:    #f3f5fb;
-  --surf-1:    #f6f7fc;
-  --surf-2:    #ffffff;
-  --surf-3:    #ffffff;
-  --border:    rgba(120,130,170,0.16);
-  --border-hi: rgba(255,255,255,0.95);
-  --accent:    #5b6cff;
-  --accent-hi: #7c5cff;
-  --accent-dim: rgba(91,108,255,0.12);
-}
+/* ---------- LIGHT = CLAYMORPHISM (tokens consolidated into main [data-theme="light"]) ---------- */
 
 @keyframes smc-claydrift {
   0%   { transform: translate(0, 0); }
   50%  { transform: translate(2%, 3%); }
   100% { transform: translate(0, 0); }
 }
-[data-theme="light"] body { background: #ecedf5; }
+[data-theme="light"] body { background: #f1f3f8; }
 [data-theme="light"] body::before {
   content: '';
   position: fixed; inset: -12%; z-index: -1; pointer-events: none;
@@ -936,7 +914,7 @@ body::before {
     radial-gradient(48% 42% at 16% 20%, rgba(124,108,255,0.50), transparent 64%),
     radial-gradient(46% 44% at 84% 76%, rgba(38,196,232,0.38), transparent 64%),
     radial-gradient(42% 38% at 60% 10%, rgba(196,92,255,0.32), transparent 68%);
-  background-color: #070912;
+  background-color: #0d1117;
   animation: smc-drift 20s ease-in-out infinite;
 }
 [data-theme="light"] body::before {
@@ -1001,8 +979,8 @@ body::before {
 
 /* Signal gradient: indigo → cyan */
 :root {
-  --signal: linear-gradient(135deg, #818cf8, #22d3ee);
-  --signal-dim: linear-gradient(135deg, rgba(129,140,248,0.18), rgba(34,211,238,0.12));
+  --signal: linear-gradient(135deg, #8a93ff, #22d3ee);
+  --signal-dim: linear-gradient(135deg, rgba(138,147,255,0.18), rgba(34,211,238,0.12));
   --font-display: var(--font-display, var(--font-sans));
 }
 
@@ -1211,6 +1189,23 @@ body::before {
   .shell-bottom-label {
     font-size: 9px;
     letter-spacing: 0.01em;
+  }
+
+  /* Theme toggle in mobile bottom nav */
+  .shell-bottom-theme {
+    background: none;
+    border: none;
+    font-size: 20px;
+    width: auto;
+    height: auto;
+    border-radius: 0;
+    cursor: pointer;
+    transform: none;
+  }
+  .shell-bottom-theme:hover {
+    background: none;
+    border-color: transparent;
+    transform: none;
   }
 }
 

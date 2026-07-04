@@ -5,7 +5,7 @@ import MinutesPanel from './MinutesPanel';
 import ActionPointsPanel from './ActionPointsPanel';
 import InterviewAssessmentPanel from './InterviewAssessmentPanel';
 import RecordingPanel from './RecordingPanel';
-import ThemeToggle from '../../components/ThemeToggle';
+
 import AppShell from '../../components/AppShell';
 
 export const dynamic = 'force-dynamic';
@@ -124,7 +124,6 @@ export default async function MeetingDetailPage({ params }) {
             </div>
           )}
         </div>
-        <ThemeToggle />
       </div>
 
       {/* Final coaching summary */}

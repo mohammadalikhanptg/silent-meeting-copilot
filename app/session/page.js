@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import ThemeToggle from '../components/ThemeToggle';
+
 import AppShell from '../components/AppShell';
 
 const ENGINE_URL = process.env.NEXT_PUBLIC_ENGINE_URL || 'https://smc-engine.ali-6b8.workers.dev';
@@ -1156,8 +1156,6 @@ export default function SessionPage() {
               {helperConnected ? 'Desktop helper connected' : 'Desktop helper not connected'}
             </span>
           </div>
-
-          <ThemeToggle />
 
           <div className="smc-controls" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>

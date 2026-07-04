@@ -3,6 +3,7 @@
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { PRODUCT_NAME } from '../lib/brand';
+import ThemeToggle from './ThemeToggle';
 
 const NAV = [
   {
@@ -112,6 +113,11 @@ export default function AppShell({ children }) {
             );
           })}
         </ul>
+
+        {/* Theme toggle — desktop sidebar footer */}
+        <div className="shell-nav-footer">
+          <ThemeToggle className="theme-toggle" title="Toggle theme" />
+        </div>
       </nav>
 
       {/* Main content */}
@@ -135,6 +141,8 @@ export default function AppShell({ children }) {
             </Link>
           );
         })}
+        {/* Theme toggle — mobile bottom nav */}
+        <ThemeToggle className="shell-bottom-item shell-bottom-theme" title="Toggle theme" />
       </nav>
     </div>
   );
