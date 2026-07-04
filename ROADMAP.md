@@ -702,3 +702,41 @@ Migration complete. SMC runs in its own Claude project with empty memory and no 
 ### Next implementation plan
 1. Real Zoom Meeting SDK adapter into the EXISTING bot/ runtime (roadmap bot phase b5): C++ headless capture on the Zoom Linux SDK + Node MeetingCaptureSource bridge, per-participant PCM with mixed-audio fallback, speaker labels degrading gracefully (name/inferred/unknown/OTHERS), behind REAL_CAPTURE_IMPLEMENTED and BOT_CAPTURE_ENABLED. Gate 1 = compile + JWT auth smoke test on the DEV-ORCH-01 Linux VM. Gate 2 = live own-account Zoom join test (needs operator meeting number + passcode). The prior greenfield attempt (job-smcbot1) is void; the brief must extend the existing runtime, not restart it.
 2. Commercial Phase 2 (cockpit rebuild + Live Focus card), then Phase 3 (usage metering on processed minutes + entitlements), Phase 4 (Settings/Billing + Stripe + Interviewer add-on gating + product rename via the brand token), Phase 5 (Insights). Per-phase live deploy + operator test.
+
+
+---
+
+## PHASE 2 SCOPE ADDITIONS (4 Jul 2026, from operator testing)
+
+Operator logged in and tested the Phase 1 shell. Two concrete items and one product concept came out of it.
+
+### 2a. Theme system consolidation and perceptual palette
+- Problem found: the new shell pages (Home, Insights, Billing) expose no theme control; the toggle only lives on session, library, profile, verify, admin. Operator saw a dark Home with no way to switch, then found the toggle only on the Live page.
+- Fix: surface the theme toggle in the persistent AppShell chrome so it is available on every authenticated page.
+- Palette intent (operator direction): theme is perceptual, not a binary black/white switch. Dark is a deep ink base with layered, elevated surfaces, not jet #000. Light is a soft neutral off-white with layered surfaces, not pure #fff. Preserve the indigo-to-cyan signal accent. WCAG AA contrast on text and controls.
+- Debt to clear in the same pass: globals.css currently carries duplicated :root and [data-theme="light"] token blocks (two competing palettes). Consolidate to one coherent token set so dark and light are consistent across all pages.
+
+### 2b. Library session management (multi-select delete)
+- Requirement: the Library (sessions) page gets a selectable list with select-all and per-row selection, a Delete Selected action, and a confirmation step that states the delete is permanent and irreversible before it proceeds.
+- Backend already exists: DELETE /api/meetings/[id] runs hardDeleteSession (DB rows plus R2 audio via deleteMeetingAudio, ownership-checked). Add a bulk path so one confirm can clear several test sessions.
+- Purpose: clean up the accumulation of test and junk sessions without touching real ones.
+
+### 2c. Personalization and Learning layer (future version concept, not V1)
+
+This is the polished, scaled version of the operator's thinking-out-loud, recorded for a future version. It is not in V1 scope (V1 stays base Meeting Coach plus Interviewer add-on).
+
+Positioning. SMC already coaches within a single session, grounded in that session's objectives and the operator's uploaded material. The next differentiator is longitudinal personalization: the system learns how this specific operator actually communicates across many meetings and coaches against their own patterns rather than generic advice. This is distinct from note-takers and post-call analysers and is commercially defensible.
+
+Two data layers, kept separate by design:
+1. Session records (raw): transcripts, optional audio, per-session coaching. Sensitive, user-owned, deletable at will. This is what 2b deletes.
+2. Derived operator profile (distilled): an abstracted, running model of the operator's communication behaviour, built by periodically distilling completed sessions into compact, non-verbatim insight (for example: tends to over-explain, under-asks for commitment, talks 70 percent of the time in supplier calls, concedes price before being asked, strong on discovery and weak on close). This profile persists independently of any single session.
+
+Design principle that resolves the delete-versus-learning tension the operator raised: distil, then allow delete. Learning is captured into the persistent derived profile as sessions complete. Deleting a raw session removes its transcript and audio but does not erase already-distilled insight, because the insight is aggregate and not tied to a single conversation. Test and junk sessions are excluded from distillation entirely via a "count this session towards learning" flag (default on, off for test calls), so cleanup never corrupts the profile. For compliance the derived profile is itself viewable, exportable, erasable on request, and regenerable from the remaining sessions.
+
+Memory model, answering the operator's question directly. Not a single persistent number, and not a live re-scan of every session on each request. A hybrid:
+- A persistent rolling behavioural profile, bounded and distilled, cheap to load. This is the account-level analogue of the existing marathon-session rolling summary.
+- On-demand, cited, real-time reference to specific past moments when relevant (for example: "in the supplier call on 12 June you agreed a discount before they asked; consider holding price"). Retrieval is scoped and cited, never a bulk re-read.
+
+Surface. A learning/insights section that reflects the operator's habitual meeting behaviour, what they consistently do well and badly, with concrete cited examples (date, meeting, moment) and suggestions for what to say differently, benchmarked against strong patterns. Natural home is the Insights phase (commercial c3 / Phase 5) plus the near-headless post-meeting analysis track (orchestration oc3).
+
+Sequencing. 2b (delete) and the raw-versus-derived separation are the enabling groundwork. The full learning layer lands with Phase 5 Insights and the post-meeting analysis pipeline, after V1.
