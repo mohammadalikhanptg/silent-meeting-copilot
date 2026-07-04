@@ -740,3 +740,23 @@ Memory model, answering the operator's question directly. Not a single persisten
 Surface. A learning/insights section that reflects the operator's habitual meeting behaviour, what they consistently do well and badly, with concrete cited examples (date, meeting, moment) and suggestions for what to say differently, benchmarked against strong patterns. Natural home is the Insights phase (commercial c3 / Phase 5) plus the near-headless post-meeting analysis track (orchestration oc3).
 
 Sequencing. 2b (delete) and the raw-versus-derived separation are the enabling groundwork. The full learning layer lands with Phase 5 Insights and the post-meeting analysis pipeline, after V1.
+
+---
+
+## Phase 2a Status — SHIPPED (2026-07-04, commit f2d7450)
+
+### 2a. Theme system — COMPLETE
+- globals.css consolidated: merged duplicate `:root` and `[data-theme="light"]` token blocks into single canonical sets; v3/v4 skin overrides removed
+- Dark palette: base raised to deep slate `#0e1117` (was jet black `#07090f`); distinct elevation steps `#141a24` → `#1a1f2e` → `#1e2438`; indigo-to-cyan accent at `#8a93ff`/`#b9c0ff`
+- Light palette: soft neutral off-white `#f1f3f8` (not pure white); layered surfaces; accent `#5b6cff`/`#7c5cff`; WCAG AA contrast confirmed in both themes
+- AppShell now hosts ThemeToggle in sidebar footer (desktop) and mobile bottom nav — one toggle, every shell page
+- Per-page ThemeToggle retired from profile, session, meetings, meetings/[id]; auth pages (login, verify, totp) and admin retain standalone toggle
+
+### 2b. Library session management — COMPLETE
+- `POST /api/meetings/bulk-delete`: ownership-checked bulk hard-delete via existing `hardDeleteSession` path; rejects any session not owned by requester (IDOR-safe); returns per-id success
+- `SessionsManager` client component: per-row checkbox, select-all, Delete selected action, confirmation dialog that states the action is permanent and cannot be undone; confirmed action clears selected sessions and refreshes list; cancel changes nothing
+- Library page (`/meetings`) updated to use SessionsManager
+
+### Deferred from Phase 2a
+- Screenshot capture via QA browser bridge (not available in this execution environment) — visual verification done via Vercel preview URL
+- Phase 2c (personalisation/learning layer) remains future scope as documented above
