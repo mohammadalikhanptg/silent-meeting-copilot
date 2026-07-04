@@ -2,32 +2,16 @@
    CALM OVERRIDES — remove continuous lateral motion
    Operator feedback: the drifting backdrop and the travelling
    diagonal sheen across every panel caused visual discomfort.
-   This keeps the static colour depth but stops ALL ambient
-   movement. Loaded after globals.css and uses !important so it
-   wins regardless of stylesheet order. Overrides the v4
-   smc-drift (body backdrop) and smc-sheen (panel sheen).
+   This kills ALL ambient animation and lets panels paint from
+   the token palette set in globals.css. No hardcoded colours.
    ========================================================== */
 
-/* Backdrop: keep the colour, stop the drift */
+/* Backdrop and all panels: stop every animation */
 body::before,
-[data-theme="light"] body::before { animation: none !important; }
-
-/* Dark panels: drop the moving sheen layer, keep a static depth gradient */
+[data-theme="light"] body::before,
 .glass, .glass-raised, .session-card, .profile-section, .admin-section,
-.smc-coach-panel, .smc-assist-panel, .smc-followup-outer, .smc-prep-panel {
-  animation: none !important;
-  background-image: linear-gradient(160deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02)) !important;
-  background-size: 100% 100% !important;
-  background-repeat: no-repeat !important;
-}
-.smc-transcript-panel {
-  animation: none !important;
-  background-image: linear-gradient(160deg, rgba(42,48,92,0.96), rgba(15,19,38,0.96)) !important;
-  background-size: 100% 100% !important;
-  background-repeat: no-repeat !important;
-}
-
-/* Light (clay) panels: same, with the clay gradient */
+.smc-coach-panel, .smc-assist-panel, .smc-followup-outer, .smc-prep-panel,
+.smc-transcript-panel,
 [data-theme="light"] .glass,
 [data-theme="light"] .glass-raised,
 [data-theme="light"] .session-card,
@@ -39,12 +23,40 @@ body::before,
 [data-theme="light"] .smc-followup-outer,
 [data-theme="light"] .smc-prep-panel {
   animation: none !important;
-  background-image: linear-gradient(160deg, #ffffff, #e9edfb) !important;
+}
+
+/* Dark panels: static depth gradient from token surfaces, no sheen layer */
+.glass, .glass-raised, .session-card, .profile-section, .admin-section,
+.smc-coach-panel, .smc-assist-panel, .smc-followup-outer, .smc-prep-panel {
+  background-image: linear-gradient(160deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02)) !important;
   background-size: 100% 100% !important;
   background-repeat: no-repeat !important;
 }
 
-/* Belt and braces: explicitly honour reduced-motion */
+/* Dark transcript panel: token-based navy gradient, not near-black */
+.smc-transcript-panel {
+  background-image: linear-gradient(160deg, var(--bg-raised), var(--bg-panel)) !important;
+  background-size: 100% 100% !important;
+  background-repeat: no-repeat !important;
+}
+
+/* Light panels: token-based gradient, white card on tinted canvas */
+[data-theme="light"] .glass,
+[data-theme="light"] .glass-raised,
+[data-theme="light"] .session-card,
+[data-theme="light"] .profile-section,
+[data-theme="light"] .admin-section,
+[data-theme="light"] .smc-transcript-panel,
+[data-theme="light"] .smc-coach-panel,
+[data-theme="light"] .smc-assist-panel,
+[data-theme="light"] .smc-followup-outer,
+[data-theme="light"] .smc-prep-panel {
+  background-image: linear-gradient(160deg, var(--bg-panel), var(--bg-raised)) !important;
+  background-size: 100% 100% !important;
+  background-repeat: no-repeat !important;
+}
+
+/* Belt and braces: honour OS reduced-motion */
 @media (prefers-reduced-motion: reduce) {
   body::before, [data-theme="light"] body::before,
   .glass, .glass-raised, .session-card, .profile-section, .admin-section,
