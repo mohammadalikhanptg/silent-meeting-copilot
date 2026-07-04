@@ -667,3 +667,38 @@ Phase 1 of the SMC commercial redesign: a persistent app shell and design system
 - Phase 2: Usage metering, entitlements, and Billing page implementation
 - Phase 2: Insights analytics layer
 - Phase 3: Pending product rename (single change to `app/lib/brand.js`)
+
+---
+
+## RECONCILIATION (4 Jul 2026) — dedicated SMC Claude project is now source of truth
+
+Migration complete. SMC runs in its own Claude project with empty memory and no access to the old project's chats. This ROADMAP.md, the Sanity hub block (427dc4bc-eb07-4ba0-9c84-78c8d1293bef) and this repo are the only durable state. The old project ("Pacific Internal Business Automations") is PAD-only going forward. Boundary rule enforced: SMC does not read or write PAD assets.
+
+### Section 18 audit — independently verified this session (executor/worker self-reports NOT trusted)
+- Repo: on main, tree clean, local == origin/main at c902fce. Last 10 commits all authored ali@khan.vg (author rule intact, no ali@pacific.london). [V]
+- Commercial Phase 1 (t-smc-commercial-v2-phase1-shell-20260703): landed on main as 97c740a (feat) + c902fce (roadmap). Diff is additive only — session cockpit wrapped in <AppShell> with zero logic change; layout adds Bricolage display font; brand token app/lib/brand.js = "Silent Meeting Copilot". [V]
+- Vercel: both Phase 1 deployments READY in production; current HEAD (c902fce) live; creator ali@khan.vg; no seat block. Project prj_eF9j961vaT9wRp8nhrYhElUG4XKz, domains include silent-meeting-copilot.vercel.app. [V]
+- HTTP no-regression smoke: production app serves; /login renders 200; all routes incl new /home, /insights, /billing gated (307 to login), no 404/500. Interactive authenticated cockpit pass (start session, coaching blocks, outputs, RecordingPanel, desktop+mobile) NOT done — magic-link + TOTP requires the operator. [PARTIAL — operator to complete]
+- Cloudflare SMC token: file present 0600, token id df39b412f9ca65b7ce0037e538cc5869 active, R2 access OK (smc-session-audio present). No drift. [V]
+- Worker: live version 59004a2c-e0d8-41af-829e-92c1aa394156 (2 Jul), AUDIO_RETENTION_ENABLED="false", SESSION_AUDIO bound to smc-session-audio. Retention dormant/fail-closed. Phase 1 correctly did not touch the worker. [V]
+- Bot runtime increment 1: npm run test:bot green — 31 synthetic + 31 envelope = 62/62 passing, 0 failed. [V]
+- Hollow bot job: t-smc-meetingbot-code-phase1-20260703 / job-smcbot1 reads "done" in Sanity but NO worker/job-smcbot1 branch exists on origin. Confirmed void; both brief and job disregarded. [V]
+- Contamination: no PAD references (pacific-assurance-dashboard, projectRoadmap.pad, cloud-identity-framework) anywhere in the repo. [V]
+- Zoom prereqs on DEV-ORCH-01: NOT re-verified this session (host is Sanity-bus dispatched, not reachable over the bridges available here). Deferred to the adapter build's compile + JWT-auth smoke test on the DEV-ORCH-01 Linux VM, which exercises the staged SDK and creds directly.
+
+### What Phase 1 changed / broke
+- Changed: new design system (globals.css), AppShell nav (sidebar desktop / bottom nav mobile), new /home, /insights, /billing routes; root / now redirects to /home. Existing pages wrapped only.
+- Broke: nothing detected at git/build/deploy/HTTP layers. Residual risk lives only in the interactive cockpit, pending the operator's authenticated pass.
+- Note: session/page.js keeps its own in-page header/brand, now slightly redundant inside the shell — a Phase 2 cleanup, not a regression.
+
+### Stale task-board statuses (noted, not corrected)
+- t-smc-installer-code-signing "active" though signing shipped/verified; t-smc-recall-ai-meeting-bot-phase2 "active" though superseded by the self-hosted decision (out of scope); t-smc-profile-text-persistence-fix "active" though display_name shipped. The hub block is the authoritative dashboard.
+
+### Hub block refresh applied (427dc4bc)
+- commercial c1 (brand + design system + app shell) -> done.
+- orchestration oc2 (in-product audio/transcript persistence) -> done (built, dormant behind AUDIO_RETENTION_ENABLED).
+- lastUpdated bumped to 4 Jul 2026.
+
+### Next implementation plan
+1. Real Zoom Meeting SDK adapter into the EXISTING bot/ runtime (roadmap bot phase b5): C++ headless capture on the Zoom Linux SDK + Node MeetingCaptureSource bridge, per-participant PCM with mixed-audio fallback, speaker labels degrading gracefully (name/inferred/unknown/OTHERS), behind REAL_CAPTURE_IMPLEMENTED and BOT_CAPTURE_ENABLED. Gate 1 = compile + JWT auth smoke test on the DEV-ORCH-01 Linux VM. Gate 2 = live own-account Zoom join test (needs operator meeting number + passcode). The prior greenfield attempt (job-smcbot1) is void; the brief must extend the existing runtime, not restart it.
+2. Commercial Phase 2 (cockpit rebuild + Live Focus card), then Phase 3 (usage metering on processed minutes + entitlements), Phase 4 (Settings/Billing + Stripe + Interviewer add-on gating + product rename via the brand token), Phase 5 (Insights). Per-phase live deploy + operator test.
