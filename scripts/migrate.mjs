@@ -158,6 +158,27 @@ try {
     used_at timestamptz NOT NULL DEFAULT now()
   )`;
   await sql`CREATE INDEX IF NOT EXISTS idx_used_engine_tokens_exp ON used_engine_tokens (exp)`;
+  // Bot session integration v1: default bot name in profile
+  await sql`ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS default_bot_name text`;
+  // Bot session integration v1: bot join request queue
+  await sql`CREATE TABLE IF NOT EXISTS bot_requests (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_email      text NOT NULL,
+    meeting_id      uuid REFERENCES meetings(id),
+    session_code    text,
+    meeting_number  bigint NOT NULL,
+    passcode        text,
+    bot_name        text NOT NULL DEFAULT 'Meeting notes',
+    status          text NOT NULL DEFAULT 'queued'
+                    CHECK (status IN ('queued','joining','waiting_room','in_meeting','passcode_required','failed','left')),
+    leave_requested boolean NOT NULL DEFAULT false,
+    claimed_at      timestamptz,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    updated_at      timestamptz NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_bot_requests_status ON bot_requests (status, created_at)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_bot_requests_user ON bot_requests (user_email, created_at DESC)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_bot_requests_session ON bot_requests (session_code)`;
   console.log('[migrate] ok');
 } catch (e) {
   // Permission denied = local env has a read-only DATABASE_URL.

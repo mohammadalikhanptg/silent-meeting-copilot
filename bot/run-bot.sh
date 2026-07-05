@@ -1,5 +1,6 @@
 #!/bin/bash
-# usage: run-bot.sh <meeting_number> [passcode]
+# usage: run-bot.sh <meeting_number> [--passcode X] [--name "display name"] [--leave-flag <path>]
+# Positional passcode (v1 compat) also accepted as second arg before any -- flags.
 pulseaudio --check 2>/dev/null || pulseaudio --start --exit-idle-time=-1
 pactl list short sinks 2>/dev/null | grep -q virtual_speaker || pactl load-module module-null-sink sink_name=virtual_speaker >/dev/null 2>&1
 pactl list short sinks 2>/dev/null | grep -q virtual_mic || pactl load-module module-null-sink sink_name=virtual_mic >/dev/null 2>&1

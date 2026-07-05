@@ -67,6 +67,7 @@ export default function ProfilePage() {
   const [socialLinks, setSocialLinks] = useState([]);
   const [bio, setBio] = useState('');
   const [defaultLanguageMode, setDefaultLanguageMode] = useState('english');
+  const [defaultBotName, setDefaultBotName] = useState('');
   const [commonItems, setCommonItems] = useState([]);
 
   // P1: Profile dual-input — typed reference text + uploaded docs
@@ -96,6 +97,7 @@ export default function ProfilePage() {
         setBio(p.bio || '');
         setDefaultLanguageMode(p.default_language_mode || 'english');
         setCommonItems(p.common_items || []);
+        setDefaultBotName(p.default_bot_name || '');
         setProfileRefText(p.profile_reference_text || '');
         setProfileDocs((p.profile_docs || []).map(doc => ({
           id: doc.id,
@@ -136,6 +138,7 @@ export default function ProfilePage() {
           default_language_mode: defaultLanguageMode,
           common_items: commonItems,
           profile_reference_text: profileRefText || null,
+          default_bot_name: defaultBotName || null,
         }),
       });
       if (!res.ok) throw new Error('Save failed');
@@ -645,6 +648,23 @@ export default function ProfilePage() {
               <option value="hindi-urdu">Hindi / Urdu (multilingual)</option>
               <option value="auto">Auto-detect</option>
             </select>
+          </section>
+
+          {/* Default bot name */}
+          <section style={styles.section}>
+            <div style={styles.sectionHeader}>
+              <span style={styles.sectionTitle}>Default bot name</span>
+            </div>
+            <p style={styles.sectionHint}>
+              When you launch a meeting bot, this name appears in the Zoom participant list. Leave blank to use a name computed from your display name (e.g. &ldquo;Ali&apos;s meeting notes&rdquo;). No SMC logo, watermark, or branding in the bot name.
+            </p>
+            <input
+              style={{ ...styles.input, maxWidth: 360 }}
+              placeholder="e.g. Ali's meeting notes"
+              value={defaultBotName}
+              onChange={e => setDefaultBotName(e.target.value)}
+              maxLength={100}
+            />
           </section>
 
           {/* Bio */}
