@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-const PUBLIC = ['/login', '/verify', '/totp', '/api/auth/', '/api/internal/', '/mockups'];
+const PUBLIC = ['/login', '/verify', '/totp', '/api/auth/', '/api/internal/', '/mockups', '/api/bot-queue'];
 
 function b64urlToBytes(s) {
   s = s.replace(/-/g, '+').replace(/_/g, '/');
@@ -89,8 +89,10 @@ export async function middleware(req) {
   const nonce = newNonce();
   const csp = buildCsp(nonce);
 
-  // CSRF: reject state-changing requests whose Origin/Referer doesn't match the app host
-  if (!isCsrfSafe(req)) {
+  // CSRF: reject state-changing requests whose Origin/Referer doesn't match the app host.
+  // Skip CSRF for public routes — machine-to-machine API calls (bot poller, internal)
+  // use their own bearer-secret auth and must not be blocked by browser-only CSRF logic.
+  if (!isPublic && !isCsrfSafe(req)) {
     return new NextResponse(JSON.stringify({ error: 'forbidden' }), {
       status: 403,
       headers: { 'Content-Type': 'application/json', 'Content-Security-Policy': csp },

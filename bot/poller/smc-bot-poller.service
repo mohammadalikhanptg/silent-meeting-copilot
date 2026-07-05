@@ -1,0 +1,18 @@
+[Unit]
+Description=SMC Meeting Bot Poller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/smc-bot/poller/smc-bot-poller.sh
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Environment file must exist at ~/.smc/bot-queue.env (mode 600)
+# Contains: APP_BASE_URL=https://... and BOT_QUEUE_SECRET=...
+
+[Install]
+WantedBy=default.target

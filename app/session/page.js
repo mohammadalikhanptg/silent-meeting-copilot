@@ -141,6 +141,15 @@ export default function SessionPage() {
   const retainAudioRef = useRef(false);
   const [prepCollapsed, setPrepCollapsed] = useState(false);
 
+  // Meeting bot state (A1/A3/A4)
+  const [botMeetingNumber, setBotMeetingNumber] = useState('');
+  const [botPasscode, setBotPasscode] = useState('');
+  const [botName, setBotName] = useState('');
+  const [botRequestId, setBotRequestId] = useState(null);
+  const [botStatus, setBotStatus] = useState(null);
+  const [botNotice, setBotNotice] = useState('');
+  const botPollTimer = useRef(null);
+
   // Cockpit layout: vertical panel order + opt-in drag-to-reorder ("Arrange") mode.
   const [panelOrder, setPanelOrder] = useState(COCKPIT_PANELS);
   const [editLayout, setEditLayout] = useState(false);
@@ -172,7 +181,11 @@ export default function SessionPage() {
   const suppressMicRef = useRef(false); // true when a desktop helper is the authoritative ME source
   const tokenRef = useRef(null);
   const heartbeatTimer = useRef(null);
+  const tokenRefreshTimer = useRef(null);
+  const coachWatchdogTimer = useRef(null);
+  const lastCoachOutputTs = useRef(0);
   const complianceAckRef = useRef(false);
+  const [coachReconnecting, setCoachReconnecting] = useState(false);
   // Sarvam streaming engine: AudioWorklet 16kHz PCM capture graph (ME channel)
   const audioCtxRef = useRef(null);
   const workletNodeRef = useRef(null);
@@ -250,6 +263,10 @@ export default function SessionPage() {
           if (!languageTouched.current && d.profile.default_language_mode) {
             setMode(d.profile.default_language_mode);
           }
+          // Pre-fill bot name from profile default or computed first-name default
+          const defaultBot = d.profile.default_bot_name ||
+            (_dn ? `${_dn}'s meeting notes` : 'Meeting notes');
+          setBotName(defaultBot);
         }
       })
       .catch(() => {});
@@ -338,6 +355,8 @@ export default function SessionPage() {
           }
           setCoaching({ ...data, updatedAt: new Date().toLocaleTimeString() });
           setDriftStreak(prev => (data?.selfCorrection?.drifting ? prev + 1 : 0));
+          lastCoachOutputTs.current = Date.now();
+          setCoachReconnecting(false);
           if (typeof data.rollingSummary === 'string') coachSummaryRef.current = data.rollingSummary;
           if (data.summarizedThrough && typeof data.summarizedThrough === 'object') coachSummaryCursorRef.current = data.summarizedThrough;
         }
@@ -540,6 +559,74 @@ export default function SessionPage() {
     e.target.value = '';
   }, [handleFiles]);
 
+  // ── Bot request helpers (A3/A4) ──────────────────────────────────────────
+  const BOT_TERMINAL = ['failed', 'passcode_required', 'left'];
+
+  const startBotPoll = useCallback((id, sc) => {
+    if (botPollTimer.current) clearInterval(botPollTimer.current);
+    botPollTimer.current = setInterval(async () => {
+      try {
+        const qs = sc ? `?session_code=${encodeURIComponent(sc)}` : '';
+        const res = await fetch(`/api/session/bot-request${qs}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data.botRequest) return;
+        const st = data.botRequest.status;
+        setBotStatus(st);
+        if (BOT_TERMINAL.includes(st)) {
+          clearInterval(botPollTimer.current);
+          const msgs = {
+            failed: 'Bot failed to join the meeting. Coaching continues via the desktop helper.',
+            passcode_required: 'Bot cannot join — meeting requires a passcode that was not provided. Coaching continues via the desktop helper.',
+            left: 'Bot has left the meeting. Coaching continues via the desktop helper.',
+          };
+          setBotNotice(msgs[st] || 'Bot session ended. Coaching continues via the desktop helper.');
+        }
+      } catch (_) {}
+    }, 5000);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const submitBotRequest = useCallback(async () => {
+    if (!/^\d{9,12}$/.test(botMeetingNumber)) return;
+    try {
+      const res = await fetch('/api/session/bot-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          meetingNumber: botMeetingNumber,
+          passcode: botPasscode || undefined,
+          botName: botName || 'Meeting notes',
+          sessionCode: sessionCode || undefined,
+          meetingId: meetingIdRef.current || undefined,
+        }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setBotRequestId(data.id);
+      setBotStatus(data.status);
+      setBotNotice('');
+      startBotPoll(data.id, sessionCode);
+    } catch (_) {}
+  }, [botMeetingNumber, botPasscode, botName, sessionCode, startBotPoll]);
+
+  const removeBotRequest = useCallback(async () => {
+    if (!botRequestId) return;
+    try {
+      await fetch('/api/session/bot-request/leave', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: botRequestId }),
+      });
+    } catch (_) {}
+    if (botPollTimer.current) clearInterval(botPollTimer.current);
+    setBotRequestId(null);
+    setBotStatus(null);
+    setBotNotice('');
+  }, [botRequestId]);
+
+  // captureSource: helper wins if connected; bot informational when in_meeting; designed for future bot-audio increment
+  const captureSource = helperConnected ? 'helper' : botStatus === 'in_meeting' ? 'bot' : 'none';
+
   // Flag a transcript line for follow-up
   const flagItem = useCallback(async (text, speaker, ts, segmentId) => {
     if (!meetingIdRef.current) return;
@@ -739,6 +826,29 @@ export default function SessionPage() {
           setError('');
           try { ws.send(JSON.stringify({ type: 'control', action: resume ? 'resume' : 'start', mode: sessionMode, engine, lang: MODE_LANG[sessionMode] || null, meetingId: meetingIdRef.current || null, retainAudio: retainAudioRef.current || false })); } catch (_) {}
           startHeartbeat();
+
+          // D: wire up the TOKEN_REFRESH_MS interval that was defined but never used.
+          // Without this, the 15-minute token expires mid-session, coach polls silently fail.
+          if (tokenRefreshTimer.current) clearInterval(tokenRefreshTimer.current);
+          tokenRefreshTimer.current = setInterval(async () => {
+            try {
+              await getEngineToken();
+            } catch (_) {}
+          }, TOKEN_REFRESH_MS);
+
+          // D: client-side coach watchdog — if no coach output for >90s while live,
+          // surface a visible reconnecting notice and attempt an immediate token refresh.
+          const COACH_WATCHDOG_MS = 90000;
+          if (coachWatchdogTimer.current) clearInterval(coachWatchdogTimer.current);
+          lastCoachOutputTs.current = Date.now(); // reset on (re)connect
+          coachWatchdogTimer.current = setInterval(async () => {
+            if (liveStatus.current !== 'live') return;
+            const gap = Date.now() - lastCoachOutputTs.current;
+            if (gap > COACH_WATCHDOG_MS) {
+              setCoachReconnecting(true);
+              try { await getEngineToken(); } catch (_) {}
+            }
+          }, 30000);
 
           ws.onmessage = (evt) => {
             try {
@@ -978,6 +1088,9 @@ export default function SessionPage() {
     intentionalStop.current = true;
     if (segmentTimer.current) { clearTimeout(segmentTimer.current); segmentTimer.current = null; }
     if (reconnectTimer.current) { clearTimeout(reconnectTimer.current); reconnectTimer.current = null; }
+    if (tokenRefreshTimer.current) { clearInterval(tokenRefreshTimer.current); tokenRefreshTimer.current = null; }
+    if (coachWatchdogTimer.current) { clearInterval(coachWatchdogTimer.current); coachWatchdogTimer.current = null; }
+    setCoachReconnecting(false);
     stopHeartbeat();
     recorderRef.current?.stop();
     try { workletNodeRef.current?.disconnect(); } catch (_) {}
@@ -1156,6 +1269,15 @@ export default function SessionPage() {
               {helperConnected ? 'Desktop helper connected' : 'Desktop helper not connected'}
             </span>
           </div>
+
+          {botStatus && (
+            <div style={{ ...styles.codeBox, background: botStatus === 'in_meeting' ? 'rgba(20,83,45,0.4)' : BOT_TERMINAL.includes(botStatus) ? 'rgba(69,10,10,0.4)' : 'rgba(30,58,95,0.4)', border: '1px solid', borderColor: botStatus === 'in_meeting' ? '#166534' : BOT_TERMINAL.includes(botStatus) ? '#7f1d1d' : '#1e3a8a' }}>
+              <span style={{ ...styles.dot, background: botStatus === 'in_meeting' ? '#22c55e' : BOT_TERMINAL.includes(botStatus) ? '#ef4444' : '#facc15' }} />
+              <span style={styles.codeLabel}>
+                Bot: {botStatus === 'queued' ? 'queued' : botStatus === 'joining' ? 'joining…' : botStatus === 'waiting_room' ? 'in waiting room' : botStatus === 'in_meeting' ? 'in meeting' : botStatus === 'passcode_required' ? 'passcode required' : botStatus === 'failed' ? 'failed' : 'left'}
+              </span>
+            </div>
+          )}
 
           <div className="smc-controls" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -1339,6 +1461,80 @@ export default function SessionPage() {
                         </button>
                       </div>
                     ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Meeting bot block (A1) */}
+              <div style={styles.fieldRow}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <label style={styles.selectorLabel}>Meeting bot (optional)</label>
+                  {botRequestId && botStatus && (
+                    <span style={{
+                      ...styles.botChip,
+                      background: botStatus === 'in_meeting' ? '#14532d' : BOT_TERMINAL.includes(botStatus) ? '#450a0a' : '#1c3d5a',
+                      color: botStatus === 'in_meeting' ? '#86efac' : BOT_TERMINAL.includes(botStatus) ? '#fca5a5' : '#93c5fd',
+                    }}>
+                      {botStatus === 'queued' ? 'Bot queued' : botStatus === 'joining' ? 'Bot joining…' : botStatus === 'waiting_room' ? 'Bot in waiting room' : botStatus === 'in_meeting' ? 'Bot in meeting' : botStatus === 'passcode_required' ? 'Passcode required' : botStatus === 'failed' ? 'Bot failed' : 'Bot left'}
+                    </span>
+                  )}
+                </div>
+                {botNotice && (
+                  <div style={{ fontSize: 12, color: '#fbbf24', marginBottom: 6, padding: '6px 10px', background: '#1c1007', borderRadius: 4, border: '1px solid #92400e' }}>
+                    {botNotice}
+                  </div>
+                )}
+                {!botRequestId ? (
+                  <>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="\d*"
+                      value={botMeetingNumber}
+                      onChange={e => setBotMeetingNumber(e.target.value.replace(/\D/g, ''))}
+                      placeholder="Zoom meeting number (9–12 digits)"
+                      style={styles.textInput}
+                      maxLength={12}
+                      disabled={isLive || isConnecting}
+                    />
+                    <input
+                      type="password"
+                      value={botPasscode}
+                      onChange={e => setBotPasscode(e.target.value)}
+                      placeholder="Passcode (optional)"
+                      style={{ ...styles.textInput, marginTop: 6 }}
+                      disabled={isLive || isConnecting}
+                      autoComplete="off"
+                    />
+                    <input
+                      type="text"
+                      value={botName}
+                      onChange={e => setBotName(e.target.value)}
+                      placeholder="Bot display name"
+                      style={{ ...styles.textInput, marginTop: 6 }}
+                      maxLength={100}
+                      disabled={isLive || isConnecting}
+                    />
+                    <div style={{ fontSize: 10, color: '#4b5563', marginTop: 4 }}>
+                      Without a passcode the bot joins and waits in the waiting room for the host to admit it. No SMC logo or branding appears in the bot name.
+                    </div>
+                    <button
+                      onClick={submitBotRequest}
+                      disabled={!/^\d{9,12}$/.test(botMeetingNumber) || !botName.trim()}
+                      style={{ ...styles.btn, background: '#1e3a5f', marginTop: 8, opacity: !/^\d{9,12}$/.test(botMeetingNumber) || !botName.trim() ? 0.5 : 1 }}
+                    >
+                      Join meeting as bot
+                    </button>
+                  </>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                    <span style={{ fontSize: 12, color: '#9ca3af' }}>Bot: {botName}</span>
+                    <button
+                      onClick={removeBotRequest}
+                      style={{ ...styles.btn, background: '#450a0a', fontSize: 12, padding: '4px 10px' }}
+                    >
+                      Remove bot
+                    </button>
                   </div>
                 )}
               </div>
@@ -1581,7 +1777,9 @@ export default function SessionPage() {
 
             ) : (
               <div style={{ padding: '12px 16px', color: '#9aa0a6', fontSize: 13 }}>
-                {isLive ? 'Coaching will appear after a few transcript segments.' : 'No coaching data for this session.'}
+                {coachReconnecting
+                  ? <span style={{ color: '#facc15' }}>Coaching reconnecting… (token refreshing)</span>
+                  : isLive ? 'Coaching will appear after a few transcript segments.' : 'No coaching data for this session.'}
               </div>
             )}
           </div>
@@ -1840,6 +2038,7 @@ const styles = {
   prepToggle: { marginLeft: 'auto', background: 'var(--surf-1)', border: '1px solid var(--border)', color: 'var(--tx-2)', borderRadius: 8, padding: '4px 11px', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600 },
   prepBody: { display: 'flex', flexDirection: 'column', gap: 14, padding: 16 },
   fieldRow: { display: 'flex', flexDirection: 'column', gap: 4 },
+  botChip: { fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10, letterSpacing: '0.02em' },
   uploadError: { background: 'var(--error-bg)', border: '1px solid rgba(244,63,94,0.25)', borderRadius: 6, padding: '6px 10px', fontSize: 12, color: '#fca5a5', marginTop: 4 },
   docList: { display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 },
   docItem: { display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px' },
