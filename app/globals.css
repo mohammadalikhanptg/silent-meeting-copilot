@@ -764,6 +764,115 @@ body {
 ::-webkit-scrollbar-thumb:hover { background: var(--tx-3); }
 
 /* ==========================================================
+   LIVE FOCUS CARD — Phase 2 hero coaching element
+   ========================================================== */
+.smc-live-focus-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--accent-dim);
+  border-radius: var(--r-lg);
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-shadow: var(--shadow-md);
+  transition: border-color var(--t-base) var(--ease), box-shadow var(--t-base) var(--ease);
+  position: relative;
+  overflow: hidden;
+}
+.smc-live-focus-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent) 0%, var(--others) 100%);
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+}
+.smc-live-focus-card--ready {
+  opacity: 0.72;
+  border-color: var(--border-subtle);
+}
+.smc-live-focus-card--ready::before { opacity: 0; }
+.smc-live-focus-card--warn { border-color: rgba(251,191,36,0.38); }
+.smc-live-focus-card--warn::before { background: var(--warn); }
+.smc-live-focus-card--alert {
+  border-color: rgba(244,63,94,0.48);
+  box-shadow: var(--shadow-md), 0 0 0 1px rgba(244,63,94,0.28);
+  animation: lfc-alert-pulse 2.4s ease-in-out infinite;
+}
+.smc-live-focus-card--alert::before { background: var(--error); }
+@keyframes lfc-alert-pulse {
+  0%, 100% { box-shadow: var(--shadow-md), 0 0 0 1px rgba(244,63,94,0.28); }
+  50%       { box-shadow: var(--shadow-md), 0 0 0 2px rgba(244,63,94,0.52); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .smc-live-focus-card--alert { animation: none; }
+}
+.lfc-header { display: flex; align-items: center; gap: 10px; }
+.lfc-eyebrow {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent-hi);
+  font-family: var(--font-display, var(--font-sans));
+}
+.lfc-ts { font-size: 10px; color: var(--tx-3); margin-left: auto; }
+.lfc-ready-state { padding: 4px 0; }
+.lfc-waiting { font-size: 13px; color: var(--tx-3); font-style: italic; }
+.lfc-reconnecting { font-size: 13px; color: var(--warn); }
+.lfc-say-next { display: flex; flex-direction: column; gap: 6px; }
+.lfc-say-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--tx-2);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.lfc-suggestion {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.55;
+  color: var(--tx);
+  font-family: var(--font-display, var(--font-sans));
+}
+.lfc-no-suggestion { font-size: 14px; color: var(--tx-3); font-style: italic; }
+.lfc-meter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+.lfc-meter-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.lfc-meter-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--tx-3);
+}
+.lfc-meter-status { font-size: 11px; font-weight: 600; }
+.lfc-meter-track {
+  height: 6px;
+  background: var(--border);
+  border-radius: var(--r-full);
+  overflow: hidden;
+}
+.lfc-meter-fill {
+  height: 100%;
+  border-radius: var(--r-full);
+  transition: width 0.8s var(--ease), background 0.4s var(--ease);
+}
+.lfc-alignment-text { font-size: 13px; color: var(--tx-2); line-height: 1.5; }
+.lfc-drift-msg { font-size: 14px; color: var(--warn); font-weight: 600; line-height: 1.55; }
+.lfc-drift-msg--alert { font-size: 18px; color: var(--error); font-weight: 800; }
+[data-theme="light"] .smc-live-focus-card {
+  background: var(--bg-panel);
+  border-color: var(--accent-dim);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ==========================================================
    RESPONSIVE
    ========================================================== */
 @media (max-width: 760px) {
