@@ -182,9 +182,9 @@ export default function SessionPage() {
       u.searchParams.set('s', code);
       history.replaceState({}, '', u);
     }
-    if (urlMeetingId) {
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (urlMeetingId && UUID_RE.test(urlMeetingId)) {
       setMeetingId(urlMeetingId);
-      // Load existing meeting data
       loadMeeting(urlMeetingId);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
