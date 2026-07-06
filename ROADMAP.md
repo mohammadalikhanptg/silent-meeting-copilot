@@ -845,3 +845,5 @@ Launch gates for external paying users (Track E, in order): cockpit Phase 2 veri
 Merged queue head: A-1 cockpit verify+merge (active task) -> C-1 auth hardening dispatch (Mac executor, includes TOTP library replacement pending D7) -> B-1/B-2 coach-path unit economics and the billable-minute definition -> B-4 monitoring/alerting -> B-5 CI engine deploy (on the D9 token). External legal clocks (D1 name clearance, D6 counsel) start on Mo's approvals. Bot line (A-6 onward) strictly off the critical path; launch-critical executor jobs route to the Mac executor only.
 
 Decisions awaiting Mo: D1 name, D2 wedge, D3 bot scope, D4 pricing structure, D5 founding programme, D6 legal budget, D7 TOTP replacement, D8 staging cost, D9 keys. Detail: docs/fable-review/FABLE_DECISIONS_FOR_MOHAMMAD.md; grouping by urgency in docs/FABLE_ABSORPTION.md section 7.
+
+QA pass 6 Jul 2026: traceability matrix at docs/fable-review/SMC-FABLE-TRACEABILITY-MATRIX.md; launch-gate register at docs/launch/smc-launch-gates.md; QA addendum in docs/FABLE_ABSORPTION.md section 12.

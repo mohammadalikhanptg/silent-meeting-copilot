@@ -169,3 +169,11 @@ For any future session: SMC continues from the MERGED roadmap, not a restart. Re
 ## 11. Next execution step
 
 A-1: verify the Phase 2 cockpit build (branch worker/job-smc-cockpit-p2) per the standing compiled-CSS rule, merge on pass, then request Mo's interactive pass; dispatch C-1 auth hardening immediately after.
+
+## 12. QA addendum (absorption QA pass, 6 Jul 2026, post-absorption)
+
+Registers created in the QA pass: item-by-item traceability matrix at docs/fable-review/SMC-FABLE-TRACEABILITY-MATRIX.md; launch-gate register (gate source of truth, G1-G10 with status/owner/evidence/blocking scope) at docs/launch/smc-launch-gates.md. Standing Sanity task t-smc-fable-backlog-review-standing requires deferred Fable items to be re-reviewed at every major milestone and every handoff.
+
+Branch-hygiene incident, recorded for future sessions: during the absorption the ROADMAP.md append was first committed on the cockpit review branch because the shared Mac checkout was sitting on worker/job-smc-cockpit-p2, not main. Detected by push rejection, cherry-picked onto main (b24bd42, additive-only, 14 insertions), and the cockpit branch hard-reset to its exact origin state (755f697), verified clean with no unpushed work. Lesson: any script using the shared checkout must explicitly check out a main-tracking branch first and restore the prior branch after.
+
+Handoff completeness additions: current active task is A-1 cockpit verification (branch worker/job-smc-cockpit-p2 at 755f697, built, unverified, unmerged). Current blocker: none for A-1; the bot line remains blocked on Worker 2 bridge parity (Skill Maintenance) and is non-gating. Execution is paused after this QA pass awaiting Mo's go, per his instruction; on resume, continue from the merged queue (section 6), starting A-1, then C-1.
