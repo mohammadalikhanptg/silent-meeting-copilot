@@ -881,6 +881,9 @@ body {
   .smc-controls { flex-wrap: wrap; }
   .smc-followup { grid-template-columns: 1fr !important; }
   .sessions-header { flex-direction: column; }
+  .smc-live-focus-card { padding: 14px 16px; gap: 12px; }
+  .lfc-suggestion { font-size: 15px; }
+  .lfc-drift-msg--alert { font-size: 15px; }
 
   /* Disable blur on mobile for performance */
   .glass, .glass-raised,
