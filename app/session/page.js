@@ -3,6 +3,8 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 
 import AppShell from '../components/AppShell';
+import ComplianceModal from './components/ComplianceModal';
+import { PRODUCT_NAME } from '../lib/brand';
 
 const ENGINE_URL = process.env.NEXT_PUBLIC_ENGINE_URL || 'https://smc-engine.ali-6b8.workers.dev';
 const CHUNK_MS = 2500;
@@ -68,45 +70,6 @@ function encodeChunk(speaker, audioBuffer) {
   out[0] = speaker === 'others' ? 1 : 0;
   out.set(new Uint8Array(audioBuffer), 1);
   return out.buffer;
-}
-
-// Compliance + per-session audio retention consent modal.
-// `onAccept(retainAudio: bool)` — caller receives the audio-retention opt-in choice.
-function ComplianceModal({ modeType, onCancel, onAccept }) {
-  const [retainAudio, setRetainAudio] = useState(false);
-  const isInterview = modeType === 'interview';
-  const isCx = modeType === 'customer_service';
-
-  const audioConsentLabel = isInterview
-    ? 'Also retain audio for this session — lets me compare our transcription against Fireflies for accuracy. The candidate\'s voice is captured; ensure you have consent.'
-    : isCx
-    ? 'Also retain audio for this session — lets me compare our transcription against Fireflies for accuracy. The customer\'s voice is captured; ensure you have consent.'
-    : 'Also retain audio for this session — lets me compare our transcription against Fireflies for accuracy. Other participants\' voices are captured; ensure you have consent.';
-
-  return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={onCancel}>
-      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: '28px 32px', maxWidth: 480, width: '90vw', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }} onClick={(e) => e.stopPropagation()}>
-        <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>Before you start</div>
-        <div style={{ fontSize: 14, color: 'var(--tx-2)', lineHeight: 1.6, marginBottom: 20 }}>
-          This meeting may be transcribed and analysed by AI to provide live assistance, quality and assessment.
-          Make sure you have any consent required, and that recording or analysing this conversation complies with the laws that apply to you and the other participants. You are responsible for lawful use.
-        </div>
-        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', marginBottom: 24, fontSize: 13, color: 'var(--tx-2)', lineHeight: 1.5 }}>
-          <input
-            type="checkbox"
-            checked={retainAudio}
-            onChange={(e) => setRetainAudio(e.target.checked)}
-            style={{ marginTop: 2, flexShrink: 0, accentColor: '#2AB49F' }}
-          />
-          <span>{audioConsentLabel}</span>
-        </label>
-        <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-          <button onClick={onCancel} style={{ padding: '8px 18px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-raised)', color: 'var(--tx)', cursor: 'pointer', fontSize: 14 }}>Cancel</button>
-          <button onClick={() => onAccept(retainAudio)} style={{ padding: '8px 18px', borderRadius: 6, border: 'none', background: '#2AB49F', color: '#fff', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>I understand — start</button>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 export default function SessionPage() {
