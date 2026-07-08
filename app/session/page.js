@@ -3,6 +3,9 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 
 import AppShell from '../components/AppShell';
+import ComplianceModal from './components/ComplianceModal';
+import LiveFocusCard from './components/LiveFocusCard';
+import { PRODUCT_NAME } from '../lib/brand';
 
 const ENGINE_URL = process.env.NEXT_PUBLIC_ENGINE_URL || 'https://smc-engine.ali-6b8.workers.dev';
 const CHUNK_MS = 2500;
@@ -34,7 +37,7 @@ function renderHighlighted(text) {
   if (typeof text !== 'string') return text;
   const parts = text.split(/\*\*([^*]+)\*\*/g);
   return parts.map((p, i) => (i % 2 === 1
-    ? <mark key={i} style={{ background: 'rgba(34,197,94,0.22)', color: '#bbf7d0', fontWeight: 700, padding: '0 5px', borderRadius: 4 }}>{p}</mark>
+    ? <mark key={i} style={{ background: 'var(--me-bg)', color: 'var(--me)', fontWeight: 700, padding: '0 5px', borderRadius: 'var(--r-xs)' }}>{p}</mark>
     : <span key={i}>{p}</span>));
 }
 const PANEL_LABELS = {
@@ -68,45 +71,6 @@ function encodeChunk(speaker, audioBuffer) {
   out[0] = speaker === 'others' ? 1 : 0;
   out.set(new Uint8Array(audioBuffer), 1);
   return out.buffer;
-}
-
-// Compliance + per-session audio retention consent modal.
-// `onAccept(retainAudio: bool)` — caller receives the audio-retention opt-in choice.
-function ComplianceModal({ modeType, onCancel, onAccept }) {
-  const [retainAudio, setRetainAudio] = useState(false);
-  const isInterview = modeType === 'interview';
-  const isCx = modeType === 'customer_service';
-
-  const audioConsentLabel = isInterview
-    ? 'Also retain audio for this session — lets me compare our transcription against Fireflies for accuracy. The candidate\'s voice is captured; ensure you have consent.'
-    : isCx
-    ? 'Also retain audio for this session — lets me compare our transcription against Fireflies for accuracy. The customer\'s voice is captured; ensure you have consent.'
-    : 'Also retain audio for this session — lets me compare our transcription against Fireflies for accuracy. Other participants\' voices are captured; ensure you have consent.';
-
-  return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={onCancel}>
-      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: '28px 32px', maxWidth: 480, width: '90vw', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }} onClick={(e) => e.stopPropagation()}>
-        <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>Before you start</div>
-        <div style={{ fontSize: 14, color: 'var(--tx-2)', lineHeight: 1.6, marginBottom: 20 }}>
-          This meeting may be transcribed and analysed by AI to provide live assistance, quality and assessment.
-          Make sure you have any consent required, and that recording or analysing this conversation complies with the laws that apply to you and the other participants. You are responsible for lawful use.
-        </div>
-        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', marginBottom: 24, fontSize: 13, color: 'var(--tx-2)', lineHeight: 1.5 }}>
-          <input
-            type="checkbox"
-            checked={retainAudio}
-            onChange={(e) => setRetainAudio(e.target.checked)}
-            style={{ marginTop: 2, flexShrink: 0, accentColor: '#2AB49F' }}
-          />
-          <span>{audioConsentLabel}</span>
-        </label>
-        <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-          <button onClick={onCancel} style={{ padding: '8px 18px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-raised)', color: 'var(--tx)', cursor: 'pointer', fontSize: 14 }}>Cancel</button>
-          <button onClick={() => onAccept(retainAudio)} style={{ padding: '8px 18px', borderRadius: 6, border: 'none', background: '#2AB49F', color: '#fff', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>I understand — start</button>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 export default function SessionPage() {
@@ -218,9 +182,9 @@ export default function SessionPage() {
       u.searchParams.set('s', code);
       history.replaceState({}, '', u);
     }
-    if (urlMeetingId) {
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (urlMeetingId && UUID_RE.test(urlMeetingId)) {
       setMeetingId(urlMeetingId);
-      // Load existing meeting data
       loadMeeting(urlMeetingId);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1248,31 +1212,23 @@ export default function SessionPage() {
     <>
       <div style={styles.root}>
 
-        {/* Top bar */}
+        {/* Top bar — AppShell provides brand/nav; this bar holds session identity + controls */}
         <div className="smc-toprow" style={styles.topbar}>
-          <div>
-            <div style={{
-              fontSize: 17, fontWeight: 700, letterSpacing: '-0.025em',
-              background: 'linear-gradient(135deg, var(--accent-hi) 0%, var(--others) 100%)',
-              WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text',
-            }}>Silent Meeting Copilot</div>
-            <div style={{ display: 'flex', gap: 12, marginTop: 2 }}>
-              <a href="/meetings" style={styles.navLink}>&larr; Sessions</a>
-              <a href="/profile" style={styles.navLink}>Profile</a>
-            </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent-hi)', letterSpacing: '0.02em', fontFamily: 'var(--font-display, var(--font-sans))' }}>{PRODUCT_NAME}</span>
+            {sessionCode && <span style={{ fontSize: 11, color: 'var(--tx-3)', fontFamily: 'monospace', letterSpacing: '0.06em' }}>{sessionCode}</span>}
           </div>
 
           <div style={styles.codeBox}>
-            <span style={{ ...styles.dot, background: helperConnected ? '#22c55e' : '#6b7280' }} />
+            <span style={{ ...styles.dot, background: helperConnected ? 'var(--success)' : 'var(--tx-2)' }} />
             <span style={styles.codeLabel}>
               {helperConnected ? 'Desktop helper connected' : 'Desktop helper not connected'}
             </span>
           </div>
 
           {botStatus && (
-            <div style={{ ...styles.codeBox, background: botStatus === 'in_meeting' ? 'rgba(20,83,45,0.4)' : BOT_TERMINAL.includes(botStatus) ? 'rgba(69,10,10,0.4)' : 'rgba(30,58,95,0.4)', border: '1px solid', borderColor: botStatus === 'in_meeting' ? '#166534' : BOT_TERMINAL.includes(botStatus) ? '#7f1d1d' : '#1e3a8a' }}>
-              <span style={{ ...styles.dot, background: botStatus === 'in_meeting' ? '#22c55e' : BOT_TERMINAL.includes(botStatus) ? '#ef4444' : '#facc15' }} />
+            <div style={{ ...styles.codeBox, background: botStatus === 'in_meeting' ? 'rgba(20,83,45,0.4)' : BOT_TERMINAL.includes(botStatus) ? 'rgba(69,10,10,0.4)' : 'rgba(30,58,95,0.4)', border: '1px solid', borderColor: botStatus === 'in_meeting' ? 'var(--success)' : BOT_TERMINAL.includes(botStatus) ? 'var(--error)' : 'var(--accent)' }}>
+              <span style={{ ...styles.dot, background: botStatus === 'in_meeting' ? 'var(--success)' : BOT_TERMINAL.includes(botStatus) ? 'var(--error)' : 'var(--warn)' }} />
               <span style={styles.codeLabel}>
                 Bot: {botStatus === 'queued' ? 'queued' : botStatus === 'joining' ? 'joining…' : botStatus === 'waiting_room' ? 'in waiting room' : botStatus === 'in_meeting' ? 'in meeting' : botStatus === 'passcode_required' ? 'passcode required' : botStatus === 'failed' ? 'failed' : 'left'}
               </span>
@@ -1307,7 +1263,7 @@ export default function SessionPage() {
               </select>
             </div>
 
-            <span style={{ ...styles.dot, background: isLive ? '#22c55e' : isConnecting ? '#facc15' : isPaused ? '#f59e0b' : (helperConnected ? '#22c55e' : '#6b7280') }} />
+            <span style={{ ...styles.dot, background: isLive ? 'var(--success)' : isConnecting ? 'var(--warn)' : isPaused ? 'var(--warn)' : (helperConnected ? 'var(--success)' : 'var(--tx-2)') }} />
             <span style={styles.statusText}>
               {isLive ? `Live — ${MODE_LABEL[mode] || mode}`
                 : isConnecting ? 'Connecting…'
@@ -1318,15 +1274,15 @@ export default function SessionPage() {
             </span>
 
             {canStart && (
-              <button onClick={handleStartClick} style={{ ...styles.btn, background: '#2AB49F', minWidth: 120 }} disabled={!sessionCode}>
+              <button onClick={handleStartClick} style={{ ...styles.btn, background: 'var(--teal)', minWidth: 120 }} disabled={!sessionCode}>
                 Start Session
               </button>
             )}
             {isPaused && (
-              <button onClick={resumeSession} style={{ ...styles.btn, background: '#f59e0b', minWidth: 120 }}>Resume</button>
+              <button onClick={resumeSession} style={{ ...styles.btn, background: 'var(--warn)', minWidth: 120 }}>Resume</button>
             )}
             {(isLive || isConnecting) && (
-              <button onClick={stopSession} style={{ ...styles.btn, background: '#ef4444', minWidth: 80 }}>Stop</button>
+              <button onClick={stopSession} style={{ ...styles.btn, background: 'var(--error)', minWidth: 80 }}>Stop</button>
             )}
           </div>
         </div>
@@ -1360,7 +1316,7 @@ export default function SessionPage() {
                   <option value="interview">Interview (recruitment)</option>
                   <option value="customer_service">Customer service</option>
                 </select>
-                <div style={{ fontSize: 10, color: '#4b5563', marginTop: 2 }}>
+                <div style={{ fontSize: 10, color: 'var(--tx-3)', marginTop: 2 }}>
                   Meeting works today. Interview and customer service add vertical-specific assistance in upcoming releases.
                 </div>
               </div>
@@ -1407,7 +1363,7 @@ export default function SessionPage() {
                   style={{ ...styles.textInput, minHeight: 80, resize: 'vertical', fontFamily: 'inherit' }}
                   maxLength={20000}
                 />
-                <div style={{ fontSize: 10, color: '#4b5563', marginTop: 2 }}>
+                <div style={{ fontSize: 10, color: 'var(--tx-3)', marginTop: 2 }}>
                   {contextNotes.length}/20000 chars — this feeds the coaching AI for this session
                 </div>
               </div>
@@ -1433,10 +1389,10 @@ export default function SessionPage() {
                     style={{ display: 'none' }}
                     onChange={handleFileInput}
                   />
-                  <div style={{ fontSize: 13, color: '#6b7280' }}>
-                    Drop .md or .txt files here, or <span style={{ color: '#38bdf8', textDecoration: 'underline' }}>click to browse</span>
+                  <div style={{ fontSize: 13, color: 'var(--tx-2)' }}>
+                    Drop .md or .txt files here, or <span style={{ color: 'var(--others)', textDecoration: 'underline' }}>click to browse</span>
                   </div>
-                  <div style={{ fontSize: 11, color: '#4b5563', marginTop: 4 }}>
+                  <div style={{ fontSize: 11, color: 'var(--tx-3)', marginTop: 4 }}>
                     Upload briefs, notes, or agendas. Content feeds the coaching AI as reference only.
                   </div>
                 </div>
@@ -1472,15 +1428,15 @@ export default function SessionPage() {
                   {botRequestId && botStatus && (
                     <span style={{
                       ...styles.botChip,
-                      background: botStatus === 'in_meeting' ? '#14532d' : BOT_TERMINAL.includes(botStatus) ? '#450a0a' : '#1c3d5a',
-                      color: botStatus === 'in_meeting' ? '#86efac' : BOT_TERMINAL.includes(botStatus) ? '#fca5a5' : '#93c5fd',
+                      background: botStatus === 'in_meeting' ? 'var(--me-bg)' : BOT_TERMINAL.includes(botStatus) ? 'var(--error-bg)' : 'var(--accent-dim)',
+                      color: botStatus === 'in_meeting' ? 'var(--me)' : BOT_TERMINAL.includes(botStatus) ? 'var(--error)' : 'var(--accent-hi)',
                     }}>
                       {botStatus === 'queued' ? 'Bot queued' : botStatus === 'joining' ? 'Bot joining…' : botStatus === 'waiting_room' ? 'Bot in waiting room' : botStatus === 'in_meeting' ? 'Bot in meeting' : botStatus === 'passcode_required' ? 'Passcode required' : botStatus === 'failed' ? 'Bot failed' : 'Bot left'}
                     </span>
                   )}
                 </div>
                 {botNotice && (
-                  <div style={{ fontSize: 12, color: '#fbbf24', marginBottom: 6, padding: '6px 10px', background: '#1c1007', borderRadius: 4, border: '1px solid #92400e' }}>
+                  <div style={{ fontSize: 12, color: 'var(--warn)', marginBottom: 6, padding: '6px 10px', background: 'rgba(28,16,7,0.9)', borderRadius: 4, border: '1px solid var(--warn)' }}>
                     {botNotice}
                   </div>
                 )}
@@ -1515,23 +1471,23 @@ export default function SessionPage() {
                       maxLength={100}
                       disabled={isLive || isConnecting}
                     />
-                    <div style={{ fontSize: 10, color: '#4b5563', marginTop: 4 }}>
+                    <div style={{ fontSize: 10, color: 'var(--tx-3)', marginTop: 4 }}>
                       Without a passcode the bot joins and waits in the waiting room for the host to admit it. No SMC logo or branding appears in the bot name.
                     </div>
                     <button
                       onClick={submitBotRequest}
                       disabled={!/^\d{9,12}$/.test(botMeetingNumber) || !botName.trim()}
-                      style={{ ...styles.btn, background: '#1e3a5f', marginTop: 8, opacity: !/^\d{9,12}$/.test(botMeetingNumber) || !botName.trim() ? 0.5 : 1 }}
+                      style={{ ...styles.btn, background: 'var(--bg-raised)', border: '1px solid var(--border)', marginTop: 8, opacity: !/^\d{9,12}$/.test(botMeetingNumber) || !botName.trim() ? 0.5 : 1 }}
                     >
                       Join meeting as bot
                     </button>
                   </>
                 ) : (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                    <span style={{ fontSize: 12, color: '#9ca3af' }}>Bot: {botName}</span>
+                    <span style={{ fontSize: 12, color: 'var(--tx-2)' }}>Bot: {botName}</span>
                     <button
                       onClick={removeBotRequest}
-                      style={{ ...styles.btn, background: '#450a0a', fontSize: 12, padding: '4px 10px' }}
+                      style={{ ...styles.btn, background: 'var(--error-bg)', border: '1px solid var(--error)', fontSize: 12, padding: '4px 10px' }}
                     >
                       Remove bot
                     </button>
@@ -1546,7 +1502,8 @@ export default function SessionPage() {
                   disabled={saveStatus === 'saving'}
                   style={{
                     ...styles.btn,
-                    background: saveStatus === 'saved' ? '#166534' : saveStatus === 'error' ? '#7f1d1d' : '#1e3a5f',
+                    background: saveStatus === 'saved' ? 'var(--success)' : saveStatus === 'error' ? 'var(--error)' : 'var(--bg-raised)',
+                    border: '1px solid var(--border)',
                     minWidth: 140,
                   }}
                 >
@@ -1555,7 +1512,7 @@ export default function SessionPage() {
                     : saveStatus === 'error' ? 'Save failed'
                     : 'Save preparation'}
                 </button>
-                <span style={{ fontSize: 12, color: '#6b7280' }}>
+                <span style={{ fontSize: 12, color: 'var(--tx-2)' }}>
                   Save without going live — reopen anytime
                 </span>
               </div>
@@ -1570,7 +1527,7 @@ export default function SessionPage() {
           </div>
         )}
         {isPaused && (
-          <div style={{ ...styles.warnBox, borderColor: '#92400e', background: '#1c1007', color: '#fcd34d' }}>
+          <div style={styles.warnBox}>
             This session is paused. Press <strong>Resume</strong> to continue capturing. It also auto-pauses if the cockpit is closed, and stops at a 3-hour limit.
           </div>
         )}
@@ -1585,6 +1542,17 @@ export default function SessionPage() {
         {/* Cockpit panels — vertical drag-to-reorder via opt-in Arrange mode */}
         {panelVisibility.transcripts && (
           <div className="smc-cockpit" style={styles.cockpit}>
+
+          {/* Live Focus card — hero coaching element, outside drag-reorder system */}
+          <LiveFocusCard
+            coaching={coaching}
+            driftStreak={driftStreak}
+            coachLabels={coachLabels}
+            coachReconnecting={coachReconnecting}
+            isLive={isLive}
+            status={status}
+          />
+
           {visiblePanels.length >= 2 && (
             <div style={styles.arrangeBar}>
               <button
@@ -1713,41 +1681,9 @@ export default function SessionPage() {
               {coaching?.updatedAt && <span style={styles.coachTs}>Updated {coaching.updatedAt}</span>}
               {isLive && !coaching && <span style={styles.coachTs}>First update in ~{COACH_MIN_SEGMENTS} segments…</span>}
             </div>
+            {/* Suggested responses + alignment moved to LiveFocusCard hero above */}
             {coaching ? (
               <div style={styles.coachStack}>
-                {/* Suggested responses — most important; objective alignment embedded below */}
-                <div style={styles.coachBlock}>
-                  <div style={styles.coachSectionLabel}>{coachLabels.sugg}</div>
-                  {coaching.suggestions?.length > 0 ? (
-                    <ul style={styles.suggList}>
-                      {coaching.suggestions.map((sug, i) => (
-                        <li key={i} style={styles.suggItem}>{renderHighlighted(sug)}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <div style={styles.coachNone}>Suggestions will appear as the conversation develops.</div>
-                  )}
-                  {coaching.alignment && (
-                    <div style={styles.alignEmbed}>
-                      <div style={styles.alignLabel}>Objective alignment</div>
-                      <div style={styles.alignText}>{coaching.alignment}</div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Stay on track — watches ME's own speech; escalates if ignored */}
-                {coaching.selfCorrection?.drifting && coaching.selfCorrection?.message ? (
-                  <div style={driftStreak >= 2 ? styles.trackBlockAlert : styles.trackBlock}>
-                    <div style={styles.trackLabel}>{driftStreak >= 2 ? 'Stay on track — you are drifting' : 'Stay on track'}</div>
-                    <div style={driftStreak >= 2 ? styles.trackMsgAlert : styles.trackMsg}>{coaching.selfCorrection.message}</div>
-                  </div>
-                ) : (
-                  <div style={styles.trackBlockOk}>
-                    <div style={styles.trackLabel}>Stay on track</div>
-                    <div style={styles.trackOkText}>On objective. Keep going.</div>
-                  </div>
-                )}
-
                 {/* Open items from others */}
                 <div style={styles.coachBlock}>
                   <div style={styles.coachSectionLabel}>{coachLabels.open}</div>
@@ -1763,11 +1699,11 @@ export default function SessionPage() {
                 {/* Talk balance — slim, optional */}
                 <div style={styles.coachBlockSlim}>
                   <div style={styles.balanceRow}>
-                    <span style={{ ...styles.balanceLabel, color: '#22c55e' }}>You {coaching.talkBalance?.mePercent ?? 50}%</span>
+                    <span style={{ ...styles.balanceLabel, color: 'var(--me)' }}>You {coaching.talkBalance?.mePercent ?? 50}%</span>
                     <div style={styles.balanceBar}>
                       <div style={{ ...styles.balanceFill, width: `${coaching.talkBalance?.mePercent ?? 50}%` }} />
                     </div>
-                    <span style={{ ...styles.balanceLabel, color: '#38bdf8' }}>Others {coaching.talkBalance?.othersPercent ?? 50}%</span>
+                    <span style={{ ...styles.balanceLabel, color: 'var(--others)' }}>Others {coaching.talkBalance?.othersPercent ?? 50}%</span>
                   </div>
                   {correctionCount > 0 && (
                     <div style={styles.repairNote}>{correctionCount} OTHERS turn{correctionCount !== 1 ? 's' : ''} auto-corrected from your restatements.</div>
@@ -1776,9 +1712,9 @@ export default function SessionPage() {
               </div>
 
             ) : (
-              <div style={{ padding: '12px 16px', color: '#9aa0a6', fontSize: 13 }}>
+              <div style={{ padding: '12px 16px', color: 'var(--tx-3)', fontSize: 13 }}>
                 {coachReconnecting
-                  ? <span style={{ color: '#facc15' }}>Coaching reconnecting… (token refreshing)</span>
+                  ? <span style={{ color: 'var(--warn)' }}>Coaching reconnecting… (token refreshing)</span>
                   : isLive ? 'Coaching will appear after a few transcript segments.' : 'No coaching data for this session.'}
               </div>
             )}
@@ -1814,8 +1750,8 @@ export default function SessionPage() {
               <a href="/profile" style={styles.profileLink}>Edit profile</a>
             </div>
             {assistCards.length === 0 && (
-              <div style={{ padding: '12px 16px', color: '#9aa0a6', fontSize: 13 }}>
-                Cards appear when you reference your profile or signal a web search ("let me google…").
+              <div style={{ padding: '12px 16px', color: 'var(--tx-3)', fontSize: 13 }}>
+                Cards appear when you reference your profile or signal a web search (&ldquo;let me google…&rdquo;).
               </div>
             )}
             {assistCards.length > 0 && (
@@ -1826,14 +1762,14 @@ export default function SessionPage() {
                   return (
                     <div key={i} style={{
                       ...styles.assistCard,
-                      borderColor: card.type === 'lookup' ? '#854d0e' : '#1e3a5f',
-                      background: card.type === 'lookup' ? '#1c1007' : '#0c1f33',
+                      borderColor: card.type === 'lookup' ? 'var(--assist-border)' : 'var(--border)',
+                      background: card.type === 'lookup' ? 'var(--assist-bg)' : 'var(--bg-up)',
                     }}>
                       <div style={styles.assistCardTop}>
                         <span style={{
                           ...styles.assistTypeBadge,
-                          background: card.type === 'lookup' ? '#78350f' : '#1e3a5f',
-                          color: card.type === 'lookup' ? '#fde68a' : '#93c5fd',
+                          background: card.type === 'lookup' ? 'var(--assist-bg)' : 'var(--accent-dim)',
+                          color: card.type === 'lookup' ? 'var(--assist)' : 'var(--accent-hi)',
                         }}>
                           {card.type === 'lookup' ? 'search' : 'my info'}
                         </span>
@@ -1841,13 +1777,13 @@ export default function SessionPage() {
                       </div>
                       {card.missing ? (
                         <div style={styles.assistMissing}>
-                          Not in your profile yet — <a href="/profile" style={{ color: '#a78bfa', textDecoration: 'underline' }}>add it</a>
+                          Not in your profile yet — <a href="/profile" style={{ color: 'var(--coach)', textDecoration: 'underline' }}>add it</a>
                         </div>
                       ) : (
                         <>
                           <div style={styles.assistValue}>{card.value}</div>
                           {card.value && (
-                            <button style={{ ...styles.copyBtn, background: isCopied ? '#166534' : '#1a2740' }} onClick={() => copyAssistCard(card)}>
+                            <button style={{ ...styles.copyBtn, background: isCopied ? 'var(--success)' : 'var(--bg-raised)' }} onClick={() => copyAssistCard(card)}>
                               {isCopied ? '✓ Copied' : 'Copy'}
                             </button>
                           )}
@@ -1994,9 +1930,9 @@ export default function SessionPage() {
 
         <div style={styles.foot}>
           Engine: {ENGINE_URL}&nbsp;&middot;&nbsp;WS:&nbsp;
-          <span style={{ color: wsConnected ? '#22c55e' : '#9aa0a6' }}>{wsConnected ? 'connected' : 'disconnected'}</span>
-          {isLive && <>&nbsp;&middot;&nbsp;<span style={{ color: '#2AB49F' }}>{MODE_LABEL[mode]}</span></>}
-          {meetingId && <>&nbsp;&middot;&nbsp;<span style={{ color: '#9aa0a6' }}>recording</span></>}
+          <span style={{ color: wsConnected ? 'var(--success)' : 'var(--tx-3)' }}>{wsConnected ? 'connected' : 'disconnected'}</span>
+          {isLive && <>&nbsp;&middot;&nbsp;<span style={{ color: 'var(--teal)' }}>{MODE_LABEL[mode]}</span></>}
+          {meetingId && <>&nbsp;&middot;&nbsp;<span style={{ color: 'var(--tx-3)' }}>recording</span></>}
         </div>
       </div>
     </>
@@ -2027,8 +1963,8 @@ const styles = {
   statusText: { fontSize: 13, color: 'var(--tx-2)', whiteSpace: 'nowrap' },
   btn: { border: 'none', borderRadius: 8, padding: '8px 18px', fontSize: 13, fontWeight: 600, color: '#fff', cursor: 'pointer', fontFamily: 'inherit', minHeight: 38 },
   textInput: { background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--tx)', borderRadius: 8, padding: '8px 12px', fontSize: 13, width: '100%', outline: 'none', fontFamily: 'inherit' },
-  warnBox: { background: '#1c1007', border: '1px solid #92400e', borderRadius: 8, padding: '8px 12px', fontSize: 13, color: '#fcd34d' },
-  errorBox: { background: 'var(--error-bg)', border: '1px solid rgba(244,63,94,0.30)', borderRadius: 8, padding: '8px 12px', fontSize: 13, color: '#fca5a5' },
+  warnBox: { background: 'rgba(28,16,7,0.9)', border: '1px solid var(--warn)', borderRadius: 8, padding: '8px 12px', fontSize: 13, color: 'var(--warn)' },
+  errorBox: { background: 'var(--error-bg)', border: '1px solid rgba(244,63,94,0.30)', borderRadius: 8, padding: '8px 12px', fontSize: 13, color: 'var(--error)' },
   // Preparation panel (outer div uses className="smc-prep-panel")
   prepHeader: {
     display: 'flex', alignItems: 'center', gap: 12,
@@ -2107,7 +2043,7 @@ const styles = {
   trackMsg: { fontSize: 16, color: '#fbbf24', lineHeight: 1.6, fontWeight: 600 },
   trackMsgAlert: { fontSize: 21, color: '#fecaca', lineHeight: 1.55, fontWeight: 800 },
   trackOkText: { fontSize: 13, color: 'var(--tx-3)', fontStyle: 'italic' },
-  repairNote: { marginTop: 8, fontSize: 12, color: '#34d399' },
+  repairNote: { marginTop: 8, fontSize: 12, color: 'var(--success)' },
   // Assist panel (outer div uses className="smc-assist-panel")
   assistHeader: { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', borderBottom: '1px solid var(--assist-border)', flexWrap: 'wrap' },
   assistTitle: { fontSize: 13, fontWeight: 600, color: 'var(--assist)' },
