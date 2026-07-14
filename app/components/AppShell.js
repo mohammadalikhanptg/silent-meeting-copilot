@@ -54,10 +54,30 @@ const I = {
       <path d="M6 9h6M6 12h4"/>
     </svg>
   ),
+  ask: (
+    <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 3h12a1 1 0 011 1v8a1 1 0 01-1 1H8l-4 3v-3H3a1 1 0 01-1-1V4a1 1 0 011-1z"/>
+      <path d="M7.6 6.6c0-.9.6-1.5 1.4-1.5s1.4.6 1.4 1.4c0 1-1.4 1.1-1.4 2.1"/>
+      <circle cx="9" cy="10.6" r="0.7" fill="currentColor" strokeWidth="0"/>
+    </svg>
+  ),
+  signals: (
+    <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1.5 9h2.5l2-5 3 10 2.5-7 1.5 2h3.5"/>
+    </svg>
+  ),
   interview: (
     <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="9" cy="6" r="3"/>
       <path d="M3.5 16c.7-3 2.9-4.5 5.5-4.5S13.8 13 14.5 16"/>
+    </svg>
+  ),
+  headset: (
+    <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 10a6 6 0 0112 0"/>
+      <rect x="2" y="9.5" width="3" height="4.5" rx="1.2"/>
+      <rect x="13" y="9.5" width="3" height="4.5" rx="1.2"/>
+      <path d="M15 14v1a2 2 0 01-2 2h-3"/>
     </svg>
   ),
   bot: (
@@ -107,7 +127,15 @@ const GROUPS = [
       { href: '/radar', label: 'Expectation Radar', icon: I.radar, badge: 'Soon' },
       { href: '/commitments', label: 'Commitments', icon: I.commitments, badge: 'New' },
       { href: '/briefings', label: 'Briefings', icon: I.briefings, badge: 'Soon' },
+      { href: '/ask', label: 'Ask SMC', icon: I.ask, badge: 'Soon' },
+      { href: '/signals', label: 'Live Signals', icon: I.signals, badge: 'Soon' },
+    ],
+  },
+  {
+    label: 'Verticals',
+    items: [
       { href: '/interview', label: 'Interview Mode', icon: I.interview, badge: 'Soon' },
+      { href: '/customer-service', label: 'Customer Service', icon: I.headset, badge: 'Soon' },
     ],
   },
   {
@@ -131,7 +159,7 @@ const BOTTOM_FIVE = [
   GROUPS[0].items[1],
   GROUPS[0].items[2],
   GROUPS[0].items[3],
-  GROUPS[3].items[0],
+  GROUPS[4].items[0],
 ];
 
 function isActive(pathname, item) {
