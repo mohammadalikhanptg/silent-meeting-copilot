@@ -105,7 +105,7 @@ const GROUPS = [
     label: 'Coaching',
     items: [
       { href: '/radar', label: 'Expectation Radar', icon: I.radar, badge: 'Soon' },
-      { href: '/commitments', label: 'Commitments', icon: I.commitments, badge: 'Soon' },
+      { href: '/commitments', label: 'Commitments', icon: I.commitments, badge: 'New' },
       { href: '/briefings', label: 'Briefings', icon: I.briefings, badge: 'Soon' },
       { href: '/interview', label: 'Interview Mode', icon: I.interview, badge: 'Soon' },
     ],
