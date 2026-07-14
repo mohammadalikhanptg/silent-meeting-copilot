@@ -2,7 +2,6 @@
 
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { PRODUCT_NAME } from '../lib/brand';
 import ThemeToggle from './ThemeToggle';
 
 const I = {
@@ -141,7 +140,7 @@ const GROUPS = [
   {
     label: 'Meeting bot',
     items: [
-      { href: '/bot', label: 'Zoom Bot', icon: I.bot, badge: 'Beta' },
+      { href: '/bot', label: 'Meeting Bot', icon: I.bot, badge: 'Beta' },
       { href: '/translation', label: 'Live Translation', icon: I.translation, badge: 'Soon' },
     ],
   },
@@ -167,6 +166,23 @@ function isActive(pathname, item) {
   return pathname === item.href || pathname.startsWith(item.href + '/');
 }
 
+function BrandMark({ size = 30 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" aria-hidden="true" style={{ flexShrink: 0, borderRadius: 9, boxShadow: '0 2px 12px rgba(85,201,185,0.4)' }}>
+      <defs>
+        <linearGradient id="smcg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#8B7CF0"/>
+          <stop offset="1" stopColor="#39B2A2"/>
+        </linearGradient>
+      </defs>
+      <rect width="48" height="48" rx="12" fill="url(#smcg)"/>
+      <rect x="13" y="19" width="4.5" height="10" rx="2.25" fill="#fff" opacity="0.85"/>
+      <rect x="21.75" y="13" width="4.5" height="22" rx="2.25" fill="#fff"/>
+      <rect x="30.5" y="17" width="4.5" height="14" rx="2.25" fill="#fff" opacity="0.85"/>
+    </svg>
+  );
+}
+
 export default function AppShell({ children }) {
   const pathname = usePathname();
 
@@ -175,8 +191,15 @@ export default function AppShell({ children }) {
       {/* Sidebar — desktop */}
       <nav className="shell-nav" aria-label="Primary navigation">
         <div className="shell-brand">
-          <div className="shell-logo" aria-hidden="true">◐</div>
-          <span className="shell-name">{PRODUCT_NAME}</span>
+          <BrandMark />
+          <div>
+            <div style={{ fontFamily: 'var(--font-display, var(--font-sans))', fontSize: 13.5, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--tx)', lineHeight: 1.22 }}>
+              Silent Meeting<br/>Copilot
+            </div>
+            <div style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: '0.13em', color: 'var(--accent-hi)', textTransform: 'uppercase', marginTop: 3 }}>
+              Live meeting coach
+            </div>
+          </div>
         </div>
 
         <div style={{ flex: 1, padding: '6px 8px 10px' }}>
