@@ -84,9 +84,9 @@ export default async function HomePage() {
         {/* Quick actions */}
         <div className="home-grid" style={{ marginBottom: 32 }}>
           <Link href="/session" className="home-card">
-            <div className="home-card-icon" style={{ background: 'rgba(129,140,248,0.15)' }}>
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#818cf8" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="9" cy="9" r="3" fill="#818cf8" strokeWidth="0"/>
+            <div className="home-card-icon" style={{ background: 'var(--accent-dim)' }}>
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="var(--accent-hi)" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="9" cy="9" r="3" fill="var(--accent-hi)" strokeWidth="0"/>
                 <circle cx="9" cy="9" r="6.5"/>
               </svg>
             </div>
@@ -96,8 +96,8 @@ export default async function HomePage() {
           </Link>
 
           <Link href="/meetings" className="home-card">
-            <div className="home-card-icon" style={{ background: 'rgba(34,211,238,0.12)' }}>
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#22d3ee" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+            <div className="home-card-icon" style={{ background: 'var(--accent-dim)' }}>
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="var(--accent-hi)" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="2" y="3" width="14" height="3" rx="1"/>
                 <rect x="2" y="8" width="14" height="3" rx="1"/>
                 <rect x="2" y="13" width="8" height="3" rx="1"/>
@@ -163,7 +163,7 @@ export default async function HomePage() {
                 borderRadius: 'var(--r-md)',
                 background: 'var(--accent-dim)',
                 color: 'var(--accent-hi)',
-                border: '1px solid rgba(129,140,248,0.25)',
+                border: '1px solid var(--accent-dim)',
                 textDecoration: 'none',
                 fontSize: 13,
                 fontWeight: 600,
