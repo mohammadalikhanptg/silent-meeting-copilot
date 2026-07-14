@@ -30,7 +30,6 @@ const NAV = [
   {
     href: '/insights',
     label: 'Insights',
-    badge: 'Soon',
     icon: (
       <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
         <path d="M2 14l4-4 3 2.5 3-6 4 4"/>
@@ -62,7 +61,6 @@ const NAV = [
   {
     href: '/billing',
     label: 'Billing',
-    badge: 'Soon',
     icon: (
       <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
         <rect x="1.5" y="4" width="15" height="10.5" rx="1.5"/>
