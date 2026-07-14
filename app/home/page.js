@@ -119,6 +119,60 @@ export default async function HomePage() {
             <div className="home-card-sub">Configure your profile, coaching style, and preferences.</div>
             <div className="home-card-arrow">Open settings →</div>
           </Link>
+
+          <Link href="/radar" className="home-card">
+            <div className="home-card-icon" style={{ background: 'var(--accent-dim)' }}>
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="var(--accent-hi)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="9" cy="9" r="1.6" fill="var(--accent-hi)" strokeWidth="0"/>
+                <path d="M9 9L14 4"/>
+                <path d="M13.6 9A4.6 4.6 0 119 4.4"/>
+                <path d="M16.5 9A7.5 7.5 0 119 1.5"/>
+              </svg>
+            </div>
+            <div className="home-card-title">Expectation Radar</div>
+            <div className="home-card-sub">Spots what the room is asking of you and hands you the answer.</div>
+            <div className="home-card-arrow">Coming soon →</div>
+          </Link>
+
+          <Link href="/commitments" className="home-card">
+            <div className="home-card-icon" style={{ background: 'var(--accent-dim)' }}>
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="var(--accent-hi)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 5l1.5 1.5L7 4"/>
+                <path d="M3 11l1.5 1.5L7 10"/>
+                <path d="M9.5 5.5H15"/>
+                <path d="M9.5 11.5H15"/>
+              </svg>
+            </div>
+            <div className="home-card-title">Commitments</div>
+            <div className="home-card-sub">Every promise made in a meeting, tracked to done.</div>
+            <div className="home-card-arrow">Coming soon →</div>
+          </Link>
+
+          <Link href="/briefings" className="home-card">
+            <div className="home-card-icon" style={{ background: 'var(--accent-dim)' }}>
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="var(--accent-hi)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 2h7l3 3v11a1 1 0 01-1 1H4a1 1 0 01-1-1V3a1 1 0 011-1z"/>
+                <path d="M11 2v3h3"/>
+                <path d="M6 9h6M6 12h4"/>
+              </svg>
+            </div>
+            <div className="home-card-title">Briefings</div>
+            <div className="home-card-sub">Walk in ready with a brief, walk out measured with a debrief.</div>
+            <div className="home-card-arrow">Coming soon →</div>
+          </Link>
+
+          <Link href="/translation" className="home-card">
+            <div className="home-card-icon" style={{ background: 'var(--accent-dim)' }}>
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="var(--accent-hi)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="9" cy="9" r="7"/>
+                <path d="M2 9h14"/>
+                <path d="M9 2c2.2 2 3.2 4.4 3.2 7S11.2 14 9 16c-2.2-2-3.2-4.4-3.2-7S6.8 4 9 2z"/>
+              </svg>
+            </div>
+            <div className="home-card-title">Live Translation</div>
+            <div className="home-card-sub">Translated captions inside the bot's own video tile.</div>
+            <div className="home-card-arrow">Coming soon →</div>
+          </Link>
         </div>
 
         {/* Recent sessions */}
