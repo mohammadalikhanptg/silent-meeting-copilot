@@ -1227,7 +1227,7 @@ export default function SessionPage() {
           </div>
 
           {botStatus && (
-            <div style={{ ...styles.codeBox, background: botStatus === 'in_meeting' ? 'rgba(20,83,45,0.4)' : BOT_TERMINAL.includes(botStatus) ? 'rgba(69,10,10,0.4)' : 'rgba(30,58,95,0.4)', border: '1px solid', borderColor: botStatus === 'in_meeting' ? 'var(--success)' : BOT_TERMINAL.includes(botStatus) ? 'var(--error)' : 'var(--accent)' }}>
+            <div style={{ ...styles.codeBox, background: botStatus === 'in_meeting' ? 'var(--me-bg)' : BOT_TERMINAL.includes(botStatus) ? 'var(--error-bg)' : 'var(--others-bg)', border: '1px solid', borderColor: botStatus === 'in_meeting' ? 'var(--success)' : BOT_TERMINAL.includes(botStatus) ? 'var(--error)' : 'var(--accent)' }}>
               <span style={{ ...styles.dot, background: botStatus === 'in_meeting' ? 'var(--success)' : BOT_TERMINAL.includes(botStatus) ? 'var(--error)' : 'var(--warn)' }} />
               <span style={styles.codeLabel}>
                 Bot: {botStatus === 'queued' ? 'queued' : botStatus === 'joining' ? 'joining…' : botStatus === 'waiting_room' ? 'in waiting room' : botStatus === 'in_meeting' ? 'in meeting' : botStatus === 'passcode_required' ? 'passcode required' : botStatus === 'failed' ? 'failed' : 'left'}
@@ -1436,7 +1436,7 @@ export default function SessionPage() {
                   )}
                 </div>
                 {botNotice && (
-                  <div style={{ fontSize: 12, color: 'var(--warn)', marginBottom: 6, padding: '6px 10px', background: 'rgba(28,16,7,0.9)', borderRadius: 4, border: '1px solid var(--warn)' }}>
+                  <div style={{ fontSize: 12, color: 'var(--warn)', marginBottom: 6, padding: '6px 10px', background: 'var(--assist-bg)', borderRadius: 4, border: '1px solid var(--warn)' }}>
                     {botNotice}
                   </div>
                 )}
@@ -1634,7 +1634,7 @@ export default function SessionPage() {
                     {l.clarifiedByMe ? (
                       <span style={{ flex: 1 }}>
                         <span style={styles.clarifiedBadge}>clarified</span>
-                        <span style={{ color: '#86efac' }}>{l.corrected}</span>
+                        <span style={{ color: 'var(--success)' }}>{l.corrected}</span>
                         <span style={styles.strikethrough} title={`Original: ${l.cleaned}`}>{' '}{l.cleaned}</span>
                       </span>
                     ) : (
@@ -1832,13 +1832,13 @@ export default function SessionPage() {
                 {activeFlaggedItems.length} active
                 {addressedCount > 0 && ` · ${addressedCount} addressed`}
               </span>
-              <span style={{ fontSize: 11, color: '#6b7280', marginLeft: 8 }}>
+              <span style={{ fontSize: 11, color: 'var(--tx-3)', marginLeft: 8 }}>
                 Flag transcript lines with ⚐ to add them here. Results appear within 1–5 min.
               </span>
             </div>
             <div className="smc-followup" style={styles.followUpGrid}>
-              <div style={{ ...styles.followUpPanel, borderColor: '#1e4d2b' }}>
-                <div style={{ ...styles.followUpPanelHead, color: '#4ade80' }}>Talking Points</div>
+              <div style={{ ...styles.followUpPanel, borderColor: 'var(--followup-border)' }}>
+                <div style={{ ...styles.followUpPanelHead, color: 'var(--followup)' }}>Talking Points</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   {flaggedItems.map((item, idx) => (
                     <div
@@ -1846,7 +1846,7 @@ export default function SessionPage() {
                       style={{
                         ...styles.tpItem,
                         opacity: item.addressed ? 0.45 : 1,
-                        borderColor: item.addressed ? '#1f2937' : '#1e4d2b',
+                        borderColor: item.addressed ? 'var(--border)' : 'var(--followup-border)',
                       }}
                     >
                       <div style={styles.tpNumber}>{idx + 1}</div>
@@ -1877,8 +1877,8 @@ export default function SessionPage() {
                 </div>
               </div>
 
-              <div style={{ ...styles.followUpPanel, borderColor: '#1e3a5f' }}>
-                <div style={{ ...styles.followUpPanelHead, color: '#60a5fa' }}>Research</div>
+              <div style={{ ...styles.followUpPanel, borderColor: 'var(--others-border)' }}>
+                <div style={{ ...styles.followUpPanelHead, color: 'var(--others)' }}>Research</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   {flaggedItems.map((item, idx) => {
                     const q = encodeURIComponent((item.text || '').trim().slice(0, 120));
@@ -1963,7 +1963,7 @@ const styles = {
   statusText: { fontSize: 13, color: 'var(--tx-2)', whiteSpace: 'nowrap' },
   btn: { border: 'none', borderRadius: 8, padding: '8px 18px', fontSize: 13, fontWeight: 600, color: '#fff', cursor: 'pointer', fontFamily: 'inherit', minHeight: 38 },
   textInput: { background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--tx)', borderRadius: 8, padding: '8px 12px', fontSize: 13, width: '100%', outline: 'none', fontFamily: 'inherit' },
-  warnBox: { background: 'rgba(28,16,7,0.9)', border: '1px solid var(--warn)', borderRadius: 8, padding: '8px 12px', fontSize: 13, color: 'var(--warn)' },
+  warnBox: { background: 'var(--assist-bg)', border: '1px solid var(--warn)', borderRadius: 8, padding: '8px 12px', fontSize: 13, color: 'var(--warn)' },
   errorBox: { background: 'var(--error-bg)', border: '1px solid rgba(244,63,94,0.30)', borderRadius: 8, padding: '8px 12px', fontSize: 13, color: 'var(--error)' },
   // Preparation panel (outer div uses className="smc-prep-panel")
   prepHeader: {
@@ -1975,7 +1975,7 @@ const styles = {
   prepBody: { display: 'flex', flexDirection: 'column', gap: 14, padding: 16 },
   fieldRow: { display: 'flex', flexDirection: 'column', gap: 4 },
   botChip: { fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10, letterSpacing: '0.02em' },
-  uploadError: { background: 'var(--error-bg)', border: '1px solid rgba(244,63,94,0.25)', borderRadius: 6, padding: '6px 10px', fontSize: 12, color: '#fca5a5', marginTop: 4 },
+  uploadError: { background: 'var(--error-bg)', border: '1px solid rgba(244,63,94,0.25)', borderRadius: 6, padding: '6px 10px', fontSize: 12, color: 'var(--error)', marginTop: 4 },
   docList: { display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 },
   docItem: { display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px' },
   docIcon: { fontSize: 14, flexShrink: 0 },
@@ -1996,8 +1996,8 @@ const styles = {
   panel: { background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: 12, padding: 14, display: 'flex', flexDirection: 'column', minHeight: 300 },
   panelHead: { fontSize: 13, fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 },
   correctionCountBadge: {
-    fontSize: 9, fontWeight: 700, color: '#34d399', background: '#052e16',
-    border: '1px solid #166534', borderRadius: 4, padding: '1px 6px', textTransform: 'uppercase', letterSpacing: '0.04em',
+    fontSize: 9, fontWeight: 700, color: 'var(--success)', background: 'var(--me-bg)',
+    border: '1px solid var(--me-border)', borderRadius: 4, padding: '1px 6px', textTransform: 'uppercase', letterSpacing: '0.04em',
   },
   transcript: { flex: 1, overflowY: 'auto', fontSize: 14, lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: 6 },
   muted: { color: 'var(--tx-2)', fontStyle: 'italic' },
@@ -2008,8 +2008,8 @@ const styles = {
   flagBtn: { background: 'none', border: 'none', fontSize: 17, padding: '0 4px', flexShrink: 0, lineHeight: 1 },
   removeFlagBtn: { background: 'none', border: 'none', color: 'var(--tx-3)', fontSize: 18, lineHeight: 1, cursor: 'pointer', padding: '0 2px', flexShrink: 0, alignSelf: 'flex-start' },
   clarifiedBadge: {
-    fontSize: 9, fontWeight: 700, color: '#34d399', background: '#052e16',
-    border: '1px solid #166534', borderRadius: 4, padding: '1px 5px', marginRight: 5,
+    fontSize: 9, fontWeight: 700, color: 'var(--success)', background: 'var(--me-bg)',
+    border: '1px solid var(--me-border)', borderRadius: 4, padding: '1px 5px', marginRight: 5,
     textTransform: 'uppercase', letterSpacing: '0.04em', verticalAlign: 'middle', display: 'inline-block',
   },
   strikethrough: { fontSize: 11, color: 'var(--tx-3)', textDecoration: 'line-through', cursor: 'help', marginLeft: 4 },
