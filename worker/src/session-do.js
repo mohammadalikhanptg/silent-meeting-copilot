@@ -41,6 +41,19 @@ export class SessionDO {
     // Sarvam streaming relays, one per channel, created lazily while a
     // sarvam-engine session is capturing; torn down on stop/suspend.
     this._sarvam = { me: null, others: null };
+    // Rows-read hot-path fix: cache the 12-key session state in instance memory.
+    // A Durable Object instance is single-threaded and its memory persists for the
+    // instance lifetime, so the audio hot path reads this cache instead of hitting
+    // storage per frame. Storage stays the source of truth across eviction: the
+    // constructor re-hydrates via blockConcurrencyWhile (the runtime awaits it
+    // before delivering any message or alarm) and _persist() keeps cache and
+    // storage in lock-step on real state transitions only.
+    this._cache = null;
+    this._hydrated = false;
+    state.blockConcurrencyWhile(async () => {
+      this._cache = await this._readStateFromStorage();
+      this._hydrated = true;
+    });
   }
 
   static _freshMetrics() {
@@ -82,7 +95,7 @@ export class SessionDO {
 
     // The browser cockpit's connect-time mode/lang/engine becomes the session default.
     if (role === 'browser') {
-      await this.state.storage.put({ mode: mode || 'auto', lang: lang || null, engine: engine || 'nova3' });
+      await this._persist({ mode: mode || 'auto', lang: lang || null, engine: engine || 'nova3' });
     }
 
     const st = await this._loadState();
@@ -98,7 +111,7 @@ export class SessionDO {
     } else {
       // Cockpit connected. If a suspend grace was pending, cancel it (cockpit returned).
       if (st.managed && st.capturing && st.graceUntil) {
-        await this.state.storage.put({ graceUntil: null });
+        await this._persist({ graceUntil: null });
         st.graceUntil = null;
       }
       try { server.send(JSON.stringify(this._sessionStateMsg(st))); } catch (_) {}
@@ -115,7 +128,9 @@ export class SessionDO {
     return new Response(null, { status: 101, webSocket: client, headers: respHeaders });
   }
 
-  async _loadState() {
+  // Single storage read of the full session state. Called once per instance
+  // lifetime (constructor hydrate, or lazy fallback), never per audio frame.
+  async _readStateFromStorage() {
     const m = await this.state.storage.get(['managed','capturing','status','mode','lang','engine','epoch','activeHelperId','captureStartedAt','graceUntil','meetingId','retainAudio']);
     return {
       managed: m.get('managed') === true,
@@ -131,6 +146,32 @@ export class SessionDO {
       meetingId: m.get('meetingId') || null,
       retainAudio: m.get('retainAudio') === true,
     };
+  }
+
+  // Serve session state from the in-memory cache. Hydrates once from storage if
+  // the constructor's blockConcurrencyWhile has not populated it yet (belt and
+  // braces). Returns a shallow copy so a caller's local mutations never corrupt
+  // the cache; the cache is only ever mutated by _persist().
+  async _loadState() {
+    if (!this._hydrated) {
+      this._cache = await this._readStateFromStorage();
+      this._hydrated = true;
+    }
+    return { ...this._cache };
+  }
+
+  // The single writer. Persists a state patch to storage (durability across
+  // eviction) AND applies it to the in-memory cache, so a later _loadState()
+  // reflects the transition with no storage read. Every call site passes values
+  // already in normalised cache shape, so a direct merge is correct.
+  async _persist(patch) {
+    await this.state.storage.put(patch);
+    if (!this._hydrated) {
+      this._cache = await this._readStateFromStorage();
+      this._hydrated = true;
+    } else {
+      Object.assign(this._cache, patch);
+    }
   }
 
   _helpers() {
@@ -184,7 +225,7 @@ export class SessionDO {
   // Elect `server` (cid) as the single active helper; demote any others.
   async _electHelper(server, cid, st) {
     const epoch = (st.epoch || 0) + 1;
-    await this.state.storage.put({ activeHelperId: cid, epoch });
+    await this._persist({ activeHelperId: cid, epoch });
     try { const a = server.deserializeAttachment() || {}; a.epoch = epoch; server.serializeAttachment(a); } catch (_) {}
     for (const ws of this._helpers()) {
       const a = ws.deserializeAttachment() || {};
@@ -220,10 +261,10 @@ export class SessionDO {
             if (ctrl.mode !== undefined) patch.mode = ctrl.mode || 'auto';
             if (ctrl.lang !== undefined) patch.lang = ctrl.lang || null;
             if (ctrl.engine !== undefined) patch.engine = ctrl.engine || 'nova3';
-            if (Object.keys(patch).length) await this.state.storage.put(patch);
-            if ((await this.state.storage.get('capturing')) === true) {
-              const sess = await this.state.storage.get(['mode','lang','engine']);
-              this._sendToHelpers({ type: 'capture', action: 'config', mode: sess.get('mode') || 'auto', engine: sess.get('engine') || 'nova3', lang: sess.has('lang') ? sess.get('lang') : null });
+            if (Object.keys(patch).length) await this._persist(patch);
+            const cfg = await this._loadState();
+            if (cfg.capturing === true) {
+              this._sendToHelpers({ type: 'capture', action: 'config', mode: cfg.mode || 'auto', engine: cfg.engine || 'nova3', lang: cfg.lang });
             }
           }
           return;
@@ -247,9 +288,9 @@ export class SessionDO {
           if (role !== 'bot' || !botCaptureEnabled(this.env)) return;
           let audio = null;
           try { audio = base64ToBytes(ctrl.audioB64 || ''); } catch (_) { return; }
-          const sess = await this.state.storage.get(['mode', 'lang']);
-          const useMode = sess.get('mode') || mode || 'auto';
-          const useLang = sess.has('lang') ? sess.get('lang') : (lang ?? null);
+          const bs = await this._loadState();
+          const useMode = bs.mode || mode || 'auto';
+          const useLang = bs.lang;
           const out = await ingestParticipantFrame(
             {
               env: this.env,
@@ -289,7 +330,7 @@ export class SessionDO {
             // false (no-persist) and is only true when the user explicitly opted in.
             if (ctrl.meetingId) patch.meetingId = ctrl.meetingId;
             if (typeof ctrl.retainAudio === 'boolean') patch.retainAudio = ctrl.retainAudio;
-            await this.state.storage.put(patch);
+            await this._persist(patch);
             let st = await this._loadState();
             const helpers = this._helpers();
             if (helpers.length) {
@@ -303,7 +344,7 @@ export class SessionDO {
             this._flushMetrics('stop');
             this._seam = { me: [], others: [] };
             this._closeSarvam();
-            await this.state.storage.put({ managed: true, capturing: false, status: 'ended', graceUntil: null, activeHelperId: null });
+            await this._persist({ managed: true, capturing: false, status: 'ended', graceUntil: null, activeHelperId: null });
             this._sendToHelpers({ type: 'capture', action: 'stop' });
             const st = await this._loadState();
             this._broadcast(this._sessionStateMsg(st));
@@ -327,9 +368,9 @@ export class SessionDO {
         if (!botCaptureEnabled(this.env)) return;
         let pframe = null;
         try { pframe = decodeFrameEnvelope(bytes); } catch (_) { return; }
-        const sess = await this.state.storage.get(['mode', 'lang']);
-        const useMode = sess.get('mode') || mode || 'auto';
-        const useLang = sess.has('lang') ? sess.get('lang') : (lang ?? null);
+        const bs = await this._loadState();
+        const useMode = bs.mode || mode || 'auto';
+        const useLang = bs.lang;
         const out = await ingestParticipantFrame(
           {
             env: this.env,
@@ -362,16 +403,19 @@ export class SessionDO {
       }
 
       const audio = bytes.slice(1);
-      const sess = await this.state.storage.get(['mode','lang','engine','retainAudio','meetingId']);
-      const useMode = sess.get('mode') || mode || 'auto';
-      const useLang = sess.has('lang') ? sess.get('lang') : (lang ?? null);
-      const useEngine = sess.get('engine') || att.engine || 'nova3';
-      const useMeetingId = sess.get('meetingId') || null;
+      // Hot path: derive session config from the in-memory cache (st, loaded above)
+      // instead of a per-frame storage read. In every reachable capture path a
+      // browser connect has already written mode/lang/engine, so st holds the same
+      // values the removed storage.get would have returned.
+      const useMode = st.mode || mode || 'auto';
+      const useLang = st.lang;
+      const useEngine = st.engine || att.engine || 'nova3';
+      const useMeetingId = st.meetingId || null;
 
       // Optional opt-in audio retention to R2 (additive; default OFF). Stores the
       // complete captured frame for later benchmark/replay. Runs only when the server
       // flag is on AND this session opted in AND a meetingId was supplied (fail closed).
-      if (audioRetentionEnabled(this.env) && this.env.SESSION_AUDIO && sess.get('retainAudio') && useMeetingId) {
+      if (audioRetentionEnabled(this.env) && this.env.SESSION_AUDIO && st.retainAudio && useMeetingId) {
         try { await this._retainAudioFrame(speaker, audio, useEngine, useMeetingId); } catch (_) {}
       }
 
@@ -444,13 +488,13 @@ export class SessionDO {
             const newest = remaining[remaining.length - 1];
             await this._electHelper(newest, (newest.deserializeAttachment() || {}).cid, st);
           } else {
-            await this.state.storage.put({ activeHelperId: null });
+            await this._persist({ activeHelperId: null });
           }
         }
         if (att.role === 'browser' && st.capturing) {
           const browsersLeft = this._browsers().filter(s => s !== ws).length;
           if (browsersLeft === 0) {
-            await this.state.storage.put({ graceUntil: Date.now() + SessionDO.GRACE_MS });
+            await this._persist({ graceUntil: Date.now() + SessionDO.GRACE_MS });
             await this._ensureAlarm();
           }
         }
@@ -493,7 +537,7 @@ export class SessionDO {
     this._flushMetrics('suspend:' + reason);
     this._seam = { me: [], others: [] };
     this._closeSarvam();
-    await this.state.storage.put({ capturing: false, status: 'paused', graceUntil: null });
+    await this._persist({ capturing: false, status: 'paused', graceUntil: null });
     this._sendToHelpers({ type: 'capture', action: 'stop' });
     const st = await this._loadState();
     this._broadcast({ ...this._sessionStateMsg(st), reason });
